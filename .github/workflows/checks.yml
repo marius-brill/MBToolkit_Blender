@@ -1,0 +1,28 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Check Python syntax
+        run: python "${{ github.workspace }}/tests/verify_structure.py"
+      - name: Check repository metadata and documents
+        run: python "${{ github.workspace }}/tests/test_repository.py"
+      - name: Test sidebar selection logic (no Blender)
+        run: python "${{ github.workspace }}/tests/test_sidebar_sections.py"

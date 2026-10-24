@@ -2,6 +2,61 @@
 
 Hard surface workflow toolkit for Blender 5.2+
 
+## Requirements
+
+- Blender **5.2 or newer**. Earlier Blender versions are not supported.
+- No pip packages are required; the add-on uses Blender's Python and its standard library.
+- Substance Painter is optional and only needed for the Painter bridge/baking feature.
+  See [Painter setup and limitations](SUBSTANCE_PAINTER.md) before enabling it.
+- Windows is the primary development environment. Other platforms need validation,
+  particularly Painter executable selection and launch behavior.
+
+## Installation
+
+1. Obtain a **built extension ZIP** from this repository's GitHub Releases, if one
+   is published. Otherwise build from source using [CONTRIBUTING.md](CONTRIBUTING.md).
+   GitHub's **Code > Download ZIP** is a source archive, not an installable extension.
+2. In Blender, open **Edit > Preferences > Add-ons**, open the menu at the top
+   right, choose **Install from Disk**, and select the built ZIP.
+3. Enable **MBToolkit** if it is not already enabled.
+4. In the 3D Viewport, press **N** and choose the **MBToolkit** sidebar tab.
+   Configure optional features in the add-on's **General** preferences.
+
+For updates, save your work and preferences, close other Blender sessions, and
+install the new built ZIP through the same installer. Restart Blender afterward.
+Do not enable a legacy checkout and an extension installation simultaneously;
+duplicate copies can register conflicting operators, panels, and shortcuts.
+To uninstall, disable/remove MBToolkit in Add-ons preferences. Exported Painter
+projects and textures are not removed by uninstalling the add-on.
+
+## Documentation and support
+
+- [UV tools guide](UV_SUITE.md)
+- [Substance Painter setup and workflow](SUBSTANCE_PAINTER.md)
+- [Development, packaging, and release checklist](CONTRIBUTING.md)
+- [Test commands and safety precautions](tests/README.md)
+- [Changes](CHANGELOG.md)
+- [Security and privacy](SECURITY.md)
+- [License](LICENSE): GNU GPL v3.0 or later, as declared in the extension manifest
+
+Use this repository's GitHub **Issues** for reproducible bugs and feature requests.
+Include Blender/add-on versions, operating system, reproduction steps, and the
+complete traceback. Remove private paths and assets before attaching logs or files.
+For sensitive vulnerabilities, follow SECURITY.md instead of opening a public issue.
+
+### Troubleshooting and safety
+
+- Missing features: enable their switches in **General** preferences, then check
+  the section selector. UV, Painter, Geometry Nodes and Resample start disabled.
+- Missing panel: use a 3D Viewport, open its sidebar with **N**, and check whether
+  Sidebar Tab Management has hidden the MBToolkit tab.
+- Shortcut conflicts: configure MBToolkit's shortcut preferences or Blender's keymap.
+- Import/registration errors: check the minimum Blender version, remove duplicate
+  installations, restart Blender, and capture the traceback from the system console.
+- Save a backup before topology changes, material replacement, or bulk operations.
+  Script Runner executes arbitrary Python with Blender's permissions: only run
+  scripts you trust. Painter remote scripting should remain local to your machine.
+
 ## General preferences / optional features
 
 Open **Edit > Preferences > Add-ons > MBToolkit > General** to choose which
@@ -294,3 +349,4 @@ The integration tests exercise registration cycles, count changes, selection, in
 - **Smart Face**:
 - **Boolean Tools**: General setup
 - **Bolts from Plane**: Add plane for where want to add a bolt. Select from dropdown list of bolts. On click highpoly of bolts get generated
+- **Script Shelf**: Shelf to load and store your most used scripts. Drop down list

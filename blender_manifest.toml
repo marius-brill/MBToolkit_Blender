@@ -1,18 +1,20 @@
 schema_version = "1.0.0"
 
 id = "mbtoolkit"
-version = "0.2.0"
+version = "0.3.0"
 name = "MBToolkit"
 tagline = "Personal hard surface workflow toolkit"
 maintainer = "Marius Brill"
 type = "add-on"
+website = "https://github.com/marius-brill/MBToolkit"
 
 blender_version_min = "5.2.0"
 
 license = ["SPDX:GPL-3.0-or-later"]
 
 [permissions]
-files = "Read and run user-selected Python scripts"
+files = "Run selected scripts and read/write bake projects and textures"
+network = "Connect to Substance Painter on localhost for baking"
 
 [build]
 paths_exclude_pattern = [
@@ -21,4 +23,12 @@ paths_exclude_pattern = [
     "/*.zip",
     "/.vscode/",
     "/tests/",
+    "/.github/",
+    "/dist/",
+    "*.py[cod]",
+    "/.gitignore",
+    "/.gitattributes",
+    "/.editorconfig",
+    "/CONTRIBUTING.md",
+    "/SECURITY.md",
 ]

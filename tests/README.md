@@ -17,11 +17,16 @@ From PowerShell, using absolute paths (adjust these for your checkout):
 ```powershell
 $root = 'C:\Users\mariu\AppData\Roaming\Blender Foundation\Blender\5.2\scripts\addons\MBToolkit'
 python "$root\tests\verify_structure.py"
+python "$root\tests\test_repository.py"
 python "$root\tests\test_sidebar_sections.py"
 ```
 
 The structure checker parses all project Python files. Without Blender, the
 sidebar script runs only its pure-Python selection tests and skips integration.
+The repository checker requires Python 3.11+ and checks metadata consistency,
+required documents, local documentation links, build exclusions, and ZIP contents
+when a built archive exists under `dist`. CI runs these three scripts without
+Blender; it does not run integration or GUI tests.
 
 ## Background Blender checks
 
@@ -38,6 +43,7 @@ Use the same invocation with one of these scripts:
 | `test_registration.py` | Registration, Modifier List and Resample regressions |
 | `test_feature_preferences.py` | Optional-feature preferences and lifecycle |
 | `test_modifier_timings.py` | Modifier evaluation timing behavior |
+| `test_modifier_catalog.py` | Native modifier catalogs with appended/prepended third-party menu callbacks |
 | `test_n_panel.py` | Sidebar tab visibility, ordering and lifecycle |
 | `test_preferences.py` | Preference data, command pickers, shortcuts and drawing |
 | `test_scene_performance.py` | Scene scanning, selection, cancellation and lifecycle |
@@ -66,6 +72,7 @@ the interactive group:
 | --- | --- |
 | `test_favorite_tiles_live.py` | Native favorite-tile press dispatch |
 | `test_modifier_popup.py` | In-viewport popup and window behavior |
+| `test_modifier_catalog_extension.py` | Standard extension ZIP install and real-layout modifier-preferences drawing with wrapped menus; requires isolated configuration (below) |
 | `test_n_panel_live.py` | Sidebar tab manager UI |
 | `test_preferences_live.py` | Shortcut capture, tiles, drag reorder and rollback |
 | `test_scene_initialization_live.py` | Scene initialization in an interactive process |
@@ -77,6 +84,15 @@ paths and create that directory if needed. Review both logs and result files:
 timer-driven GUI failures are not necessarily reflected in the process exit code.
 Visual appearance, real OS input, focus, and interactive undo/redo still need manual
 smoke testing.
+
+For `test_modifier_catalog_extension.py`, set both `BLENDER_USER_CONFIG` and
+`BLENDER_USER_EXTENSIONS` to disposable directories under a temporary parent whose
+name starts with `mbt_extension_test_`. Restore these environment variables after
+the process finishes. The script installs its own ZIP with Blender's standard
+extension installer and draws the installed modifier-preferences builder in a test
+panel; it does not simulate the OS drop gesture. Check
+`$env:TEMP\mbt_modifier_extension_result.txt` for `PASS` and the process error log
+for drawing errors. Do not run against your normal extension repository.
 
 ## Sidebar persistence (two processes)
 

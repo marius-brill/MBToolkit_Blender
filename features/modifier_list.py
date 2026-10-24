@@ -277,7 +277,16 @@ def catalog(obj_type):
         proxy = SimpleNamespace(layout=_Catalog(category, output), bl_label=cls.bl_label,
                                 operator_modifier_add=cls.operator_modifier_add,
                                 operator_modifier_add_asset=cls.operator_modifier_add_asset)
-        cls.draw(proxy, SimpleNamespace(object=SimpleNamespace(type=obj_type)))
+        draw = cls.draw
+        draw_funcs = getattr(draw, '_draw_funcs', None)
+        if draw_funcs is not None:
+            # Menu.append/prepend wraps draw with real-UI context handling.
+            # Read only Blender's definition, not third-party UI callbacks.
+            # Prepending means the native function is not necessarily first.
+            draw = next(func for func in draw_funcs
+                        if func.__module__ == cls.__module__
+                        and func.__qualname__ == cls.__name__ + '.draw')
+        draw(proxy, SimpleNamespace(object=SimpleNamespace(type=obj_type)))
     if obj_type in {'EMPTY', 'MESH', 'CURVE', 'CURVES', 'FONT', 'VOLUME', 'POINTCLOUD', 'GREASEPENCIL'}:
         output.append({'category': 'Generate', 'operator': 'object.modifier_add',
                        'args': {'type': 'NODES'}, 'label': 'Geometry Nodes', 'icon': 'GEOMETRY_NODES'})
