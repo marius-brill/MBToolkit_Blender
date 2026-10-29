@@ -66,7 +66,7 @@ def main():
         settings.high_collection.objects.unlink(low)
         uv = low.data.uv_layers.active.data[0].uv.copy()
         low.data.uv_layers.active.data[0].uv = (2, 2)
-        expect_error(lambda: jobs.validate(ctx), '0–1')
+        expect_error(lambda: jobs.validate(ctx), 'bake-tile boundary')
         low.data.uv_layers.active.data[0].uv = uv
         selected, active = list(ctx.selected_objects), ctx.view_layer.objects.active
         before = counts()
@@ -178,17 +178,17 @@ def main():
         expect_error(lambda: materials.import_maps(ctx), 'not found')
         assert low.data.materials[0] == material
         # FBX failures clean temporary data and incomplete job folders.
-        previous = jobs.export_meshes
+        previous = jobs.export_steps
         def fail(*args, **kwargs):
             raise RuntimeError('Simulated exporter failure')
-        jobs.export_meshes = fail
+        jobs.export_steps = fail
         directories = set(Path(folder).iterdir())
         try:
             jobs.prepare(ctx)
         except RuntimeError:
             pass
         finally:
-            jobs.export_meshes = previous
+            jobs.export_steps = previous
         assert set(Path(folder).iterdir()) == directories
     output = io.StringIO()
     with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):

@@ -19,6 +19,7 @@ class MBT_PainterSettings(bpy.types.PropertyGroup):
         description='Optional Painter .spt template; used only when creating a project')
     project_file: StringProperty(name='Associated Project', subtype='FILE_PATH', options={'HIDDEN'})
     advanced: BoolProperty(name='Advanced / Troubleshooting', default=False)
+    bake_settings: BoolProperty(name='Bake Settings', default=False)
     export_config: StringProperty(name='Custom Export Mapping', subtype='FILE_PATH',
         description='Optional JSON mapping for an existing Painter export preset; empty uses automatic MBToolkit PBR')
     output_dir: StringProperty(name='Output Folder', subtype='DIR_PATH')
@@ -46,6 +47,8 @@ class MBT_PainterSettings(bpy.types.PropertyGroup):
     last_job: StringProperty(name='Job Manifest', subtype='FILE_PATH',
         description='Prepared job.json used for importing; may also point to an earlier job')
     report: StringProperty(name='Last Result')
+    preparation_timings: StringProperty(name='Preparation Timings', options={'SKIP_SAVE'},
+        description='JSON timings for preparation steps, excluding time between UI ticks')
 
 
 classes = (MBT_PainterSettings,)
@@ -54,12 +57,15 @@ classes = (MBT_PainterSettings,)
 def register():
     register_classes(classes)
     bpy.types.Scene.mbt_painter = PointerProperty(type=MBT_PainterSettings)
+    bpy.types.Object.mbt_bake_group = StringProperty(name='Bake Group',
+        description='Shared group for any number of low and high meshes; overrides automatic matching')
     bpy.types.Object.mbt_bake_target = PointerProperty(name='Bake Target', type=bpy.types.Object,
         poll=lambda self, obj: obj.type == 'MESH' and obj != self,
-        description='Explicit low mesh for this high mesh; leave empty for name/spatial matching')
+        description='Stored low target takes priority on each bake; clear to re-run name/surface matching')
 
 
 def unregister():
+    del bpy.types.Object.mbt_bake_group
     del bpy.types.Object.mbt_bake_target
     del bpy.types.Scene.mbt_painter
     unregister_classes(classes)

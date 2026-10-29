@@ -20,7 +20,77 @@ def _mbt_probe():
     })
 
 
+def _mbt_guard_touch():
+    import time
+    globals()['_mbt_guard_deadline'] = time.monotonic() + 300
+
+
+def _mbt_guard_release(show=False):
+    state = globals().pop('_mbt_guard_window', None)
+    timer = globals().pop('_mbt_guard_timer', None)
+    if timer is not None:
+        timer.stop()
+        timer.deleteLater()
+    if state is not None:
+        window, enabled, visible = state
+        window.setEnabled(enabled)
+        if visible or show:
+            window.show()
+    if show:
+        import substance_painter.ui as ui
+        ui.show_main_window()
+    return _mbt_json.dumps({'state': 'RELEASED'})
+
+
+def _mbt_guard_acquire():
+    """Disable/hide Painter during automation; watchdog recovers lost Blender clients."""
+    if globals().get('_mbt_guard_window') is not None:
+        return _mbt_json.dumps({'error': 'Painter is already reserved for an automated bake'})
+    try:
+        import time
+        import substance_painter.ui as ui
+        from PySide6.QtCore import QTimer
+        window = ui.get_main_window()
+        globals()['_mbt_guard_window'] = (window, window.isEnabled(), window.isVisible())
+        _mbt_guard_touch()
+        timer = QTimer(window)
+        def watchdog():
+            if time.monotonic() > globals().get('_mbt_guard_deadline', 0):
+                _mbt_guard_release(show=True)
+        timer.timeout.connect(watchdog)
+        globals()['_mbt_guard_timer'] = timer
+        timer.start(1000)
+        window.setEnabled(False)
+        window.hide()
+        return _mbt_json.dumps({'state': 'RESERVED'})
+    except Exception as error:
+        _mbt_guard_release()
+        return _mbt_json.dumps({'error': 'Cannot protect Painter UI: ' + str(error)})
+
+
+def _mbt_open_project(project_file):
+    try:
+        if globals().get('_mbt_guard_window') is not None:
+            raise RuntimeError('Painter is reserved for an automated bake')
+        path = _MBTPath(project_file).resolve()
+        if not path.is_file() or path.suffix.lower() != '.spp':
+            raise RuntimeError('Associated Painter project does not exist yet; complete a bake first')
+        if _mbt_project.is_busy():
+            raise RuntimeError('Painter is busy')
+        if _mbt_project.is_open():
+            if _MBTPath(_mbt_project.file_path()).resolve() != path:
+                raise RuntimeError('An unrelated Painter project is open. Save and close it first')
+        else:
+            _mbt_project.open(str(path))
+        import substance_painter.ui as ui
+        ui.show_main_window()
+        return _mbt_json.dumps({'state': 'OPENED', 'project_file': str(path)})
+    except Exception as error:
+        return _mbt_json.dumps({'error': str(error)})
+
+
 def _mbt_status():
+    _mbt_guard_touch()
     if _mbt_state.get('state') in {'OPENING', 'RELOADED'} and not _mbt_project.is_busy() and _mbt_project.is_in_edition_state():
         if _mbt_state['state'] == 'OPENING':
             return _mbt_update(_mbt_state['job_path'])
@@ -28,7 +98,8 @@ def _mbt_status():
         if sorted(ts.name() for ts in _mbt_textureset.all_texture_sets()) != sorted(e['texture_set'] for e in job['texture_sets']):
             _mbt_state.update(state='FAILED', error='Texture sets changed during mesh reload; baking stopped')
         else:
-            _mbt_state.update(state='COMPLETE')
+            _mbt_state.update(state='COMPLETE', project_file=job['project_file'],
+                              texture_sets=sorted(e['texture_set'] for e in job['texture_sets']))
     if (_mbt_state.get('state') == 'CREATING' and _mbt_project.is_in_edition_state()
             and not _mbt_project.is_busy()):
         _mbt_finish()
@@ -90,6 +161,7 @@ def _mbt_create(job_path):
 def _mbt_update(job_path):
     """Open only the associated project, then refresh geometry without closing anything."""
     global _mbt_state
+    _mbt_guard_touch()
     try:
         job = _mbt_json.loads(_MBTPath(job_path).read_text(encoding='utf-8'))
         if _mbt_project.is_busy():
@@ -121,6 +193,7 @@ def _mbt_update(job_path):
 def _mbt_export(job_path):
     """Export only the saved project belonging to this manifest; never bake or save it."""
     try:
+        _mbt_guard_touch()
         import substance_painter.export as export
         import math
         import tempfile
@@ -192,6 +265,7 @@ def _mbt_export(job_path):
 
 
 def _mbt_bake_status():
+    _mbt_guard_touch()
     return _mbt_json.dumps(globals().get('_mbt_bake_state', {'state': 'IDLE'}))
 
 
@@ -204,6 +278,7 @@ def _mbt_cancel_bake():
 
 def _mbt_bake(job_path):
     global _mbt_bake_state, _mbt_stop
+    _mbt_guard_touch()
     try:
         import math
         import substance_painter.baking as baking
@@ -301,6 +376,7 @@ def _mbt_bake(job_path):
 
 
 def _mbt_save_baked(job_path):
+    _mbt_guard_touch()
     try:
         job = _mbt_json.loads(_MBTPath(job_path).read_text(encoding='utf-8'))
         if globals().get('_mbt_bake_state', {}).get('state') != 'BAKED':

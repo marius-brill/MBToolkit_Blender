@@ -8,6 +8,7 @@ import tempfile
 import uuid
 
 import bpy
+from .evaluation import bake_inputs, bake_steps, finish_steps
 
 SCHEMA_VERSION = 1
 CHANNELS = {'base_color': 'BaseColor', 'roughness': 'Roughness', 'metallic': 'Metallic',
@@ -16,6 +17,13 @@ CHANNELS = {'base_color': 'BaseColor', 'roughness': 'Roughness', 'metallic': 'Me
 
 class PainterError(ValueError):
     pass
+
+
+class ValidationIssues(PainterError):
+    def __init__(self, issues):
+        self.issues = issues
+        self.blocking = any(issue['blocking'] for issue in issues)
+        super().__init__('; '.join(f"{issue['object']}: {issue['reason']}" for issue in issues))
 
 
 def safe_name(name):
@@ -27,7 +35,12 @@ def meshes(collection):
                   key=lambda obj: obj.name) if collection else []
 
 
-def validate(context):
+def validate(context, ignore_warnings=False):
+    return finish_steps(validate_steps(context, ignore_warnings=ignore_warnings))
+
+
+@bake_steps
+def validate_steps(context, ignore_warnings=False):
     settings = context.scene.mbt_painter
     if context.mode != 'OBJECT':
         raise PainterError('Switch to Object Mode before preparing a job')
@@ -39,17 +52,45 @@ def validate(context):
     names = [safe_name(obj.name) for obj in low]
     if len(names) != len(set(names)):
         raise PainterError('Low-poly names collide after filename sanitization; rename the objects')
+    issues = []
+    def issue(obj, reason, blocking=True):
+        issues.append({'object': obj.name, 'reason': reason, 'blocking': blocking})
+    if not settings.bake_maps:
+        raise PainterError('Select at least one bake map')
+    if not settings.output_dir.strip():
+        raise PainterError('Choose an output folder')
+    if settings.output_dir.startswith('//') and not bpy.data.filepath:
+        raise PainterError('Save the blend file or choose an absolute output folder')
     for obj in low + high:
-        if obj.name not in context.view_layer.objects or not obj.visible_get(view_layer=context.view_layer):
-            raise PainterError(f'{obj.name}: must be visible in the current view layer for evaluation')
+        yield 'Validating mesh: ' + obj.name
         if obj.library or obj.data.library:
-            raise PainterError(f'{obj.name}: linked data is not supported; make it local first')
+            issue(obj, 'linked data is not supported; make it local first')
         if not obj.data.polygons:
-            raise PainterError(f'{obj.name}: mesh has no faces')
+            issue(obj, 'mesh has no faces')
         if abs(obj.matrix_world.determinant()) < 1e-12:
-            raise PainterError(f'{obj.name}: transform has zero scale')
-    for obj in low:
-        validate_uv(obj.data, obj.name)
+            issue(obj, 'transform has zero scale')
+        if obj in low:
+            try:
+                validate_uv(obj.data, obj.name, ignore_warnings=ignore_warnings)
+            except ValidationIssues as error:
+                issues.extend(error.issues)
+        depsgraph = context.evaluated_depsgraph_get()
+        evaluated = obj.evaluated_get(depsgraph)
+        mesh = evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
+        try:
+            if not mesh or not mesh.polygons:
+                issue(obj, 'evaluated mesh has no faces')
+            elif obj in low:
+                try:
+                    validate_uv(mesh, obj.name, ignore_warnings=ignore_warnings)
+                except ValidationIssues as error:
+                    for entry in error.issues:
+                        if entry not in issues:
+                            issues.append(entry)
+        finally:
+            evaluated.to_mesh_clear()
+    if issues:
+        raise ValidationIssues(issues)
     if not settings.bake_maps:
         raise PainterError('Select at least one bake map')
     if not settings.output_dir.strip():
@@ -59,31 +100,45 @@ def validate(context):
     return low, high
 
 
-def validate_uv(mesh, name):
+def validate_uv(mesh, name, ignore_warnings=False):
     uv = mesh.uv_layers.active
     if uv is None:
-        raise PainterError(f'{name}: low-poly mesh needs an active UV map')
-    # This first contract is a single 0–1 tile per object, not a UDIM workflow.
+        raise ValidationIssues([{'object': name, 'reason': 'low-poly mesh needs an active UV map', 'blocking': True}])
+    # Offset mirrored islands stay outside the bake tile; never wrap or normalize them.
     coords = [item.uv for item in uv.data]
-    if any(not math.isfinite(v) or v < -1e-6 or v > 1 + 1e-6 for co in coords for v in co):
-        raise PainterError(f'{name}: UVs must be finite and within the 0–1 tile (no UDIMs yet)')
+    if any(not math.isfinite(v) for co in coords for v in co):
+        raise ValidationIssues([{'object': name, 'reason': 'UVs must be finite', 'blocking': True}])
+    warnings = set()
     mesh.calc_loop_triangles()
     for triangle in mesh.loop_triangles:
         a, b, c = (coords[index] for index in triangle.loops)
+        if any(max(co[i] for co in (a, b, c)) <= 0 or min(co[i] for co in (a, b, c)) >= 1 for i in range(2)):
+            continue
+        if any(v < -1e-6 or v > 1 + 1e-6 for co in (a, b, c) for v in co):
+            warnings.add('UV triangles cross the 0–1 bake-tile boundary')
         area = (b.x-a.x)*(c.y-a.y) - (b.y-a.y)*(c.x-a.x)
         if abs(area) < 1e-12:
-            raise PainterError(f'{name}: UVs contain collapsed triangles')
+            warnings.add('UVs contain collapsed triangles')
+    if warnings and not ignore_warnings:
+        raise ValidationIssues([{'object': name, 'reason': reason, 'blocking': False} for reason in sorted(warnings)])
 
 
-def export_meshes(context, objects, filepath, low=False, names=None, material_names=None):
+def export_meshes(context, objects, filepath, low=False, names=None, material_names=None, ignore_warnings=False):
+    return finish_steps(export_steps(context, objects, filepath, low=low, names=names,
+                                    material_names=material_names, ignore_warnings=ignore_warnings))
+
+
+@bake_steps
+def export_steps(context, objects, filepath, low=False, names=None, material_names=None, ignore_warnings=False):
     """Export evaluated copies in a disposable scene; never select/change source objects."""
-    depsgraph = context.evaluated_depsgraph_get()
     scene = bpy.data.scenes.new('MBT_Painter_Export')
     scene.unit_settings.system = context.scene.unit_settings.system
     scene.unit_settings.scale_length = context.scene.unit_settings.scale_length
     temporary_objects, temporary_meshes, temporary_materials = [], [], []
     try:
         for index, source in enumerate(objects):
+            yield 'Snapshot ' + ('low' if low else 'high') + ' mesh: ' + source.name
+            depsgraph = context.evaluated_depsgraph_get()
             evaluated = source.evaluated_get(depsgraph)
             mesh = bpy.data.meshes.new_from_object(evaluated, preserve_all_data_layers=True,
                                                  depsgraph=depsgraph)
@@ -91,7 +146,7 @@ def export_meshes(context, objects, filepath, low=False, names=None, material_na
             if not mesh.polygons:
                 raise PainterError(f'{source.name}: evaluated mesh has no faces')
             if low:
-                validate_uv(mesh, source.name)
+                validate_uv(mesh, source.name, ignore_warnings=ignore_warnings)
             # Unique material per low object gives deterministic Painter texture-set names.
             if low:
                 mesh.materials.clear()
@@ -112,6 +167,7 @@ def export_meshes(context, objects, filepath, low=False, names=None, material_na
                 raise PainterError(f'Export name {expected} is occupied. Rename that source object (export names are reserved)')
             obj.matrix_world = evaluated.matrix_world.copy()
             scene.collection.objects.link(obj)
+        yield 'Exporting ' + ('low-poly' if low else 'high-poly') + ' FBX'
         layer = scene.view_layers[0]
         layer.update()
         with context.temp_override(scene=scene, view_layer=layer):
@@ -133,11 +189,25 @@ def export_meshes(context, objects, filepath, low=False, names=None, material_na
             bpy.data.materials.remove(material)
 
 
-def prepare(context, automatic=False):
-    low, high = validate(context)
+def prepare(context, automatic=False, ignore_warnings=False):
+    return finish_steps(prepare_steps(context, automatic=automatic, ignore_warnings=ignore_warnings))
+
+
+def prepare_steps(context, automatic=False, ignore_warnings=False):
+    yield 'Preparing mesh snapshots'
     settings = context.scene.mbt_painter
-    names, pairs = None, {}
     previous = None
+    # Resolve persisted project metadata before evaluating potentially huge meshes.
+    # Never guess old texture-set identities or silently discard existing painting.
+    if automatic and settings.project_file:
+        if not settings.last_job:
+            raise PainterError('Internal project data is missing. Use New Project in Advanced to reset safely')
+        previous = read_job(settings.last_job)
+        if Path(previous['project_file']).resolve() != Path(bpy.path.abspath(settings.project_file)).resolve():
+            raise PainterError('Associated project identity differs from internal job')
+        if previous['normal_format'] != settings.normal_format:
+            raise PainterError('Normal format changed; use New Project in Advanced to apply it safely')
+    names, pairs = None, {}
     custom = None
     from ...core.addon import get_prefs
     prefs = get_prefs(context)
@@ -156,17 +226,10 @@ def prepare(context, automatic=False):
                        for value in custom['channels'].values())
                 or len(set(custom['channels'].values())) != len(custom['channels'])):
             raise PainterError('Export mapping needs preset URL and unpacked PNG channels containing {texture_set}')
+    low, high = yield from validate_steps(context, ignore_warnings=ignore_warnings)
     if automatic:
-        from .matching import resolve
-        names, pairs = resolve(context, low, high)
-        if settings.project_file and not settings.last_job:
-            raise PainterError('Internal project data is missing. Use New Project in Advanced to reset safely')
-        if settings.last_job and settings.project_file:
-            previous = read_job(settings.last_job)
-            if Path(previous['project_file']).resolve() != Path(bpy.path.abspath(settings.project_file)).resolve():
-                raise PainterError('Associated project identity differs from internal job')
-            if previous['normal_format'] != settings.normal_format:
-                raise PainterError('Normal format changed; use New Project in Advanced to apply it safely')
+        from .matching import resolve_steps
+        names, pairs = yield from resolve_steps(context, low, high)
         from .materials import owned
         if not settings.replace_materials:
             protected = [obj.name for obj in low if any(slot.material and not owned(slot.material, obj)
@@ -191,14 +254,25 @@ def prepare(context, automatic=False):
                 old_name = previous.get('mesh_names', {}).get(entry['object'])
                 if old_name:
                     names[target] = old_name
-                    for index, obj in enumerate(obj for obj in high if pairs[obj] == target):
-                        names[obj] = old_name[:-4] + '_high' + (f'_{index:03d}' if index else '')
+            from .matching import targets
+            for obj in high:
+                prefixes = {re.sub(r'_low(?:_\d+)?$', '', names[target]) for target in targets(pairs[obj])}
+                if len(prefixes) != 1:
+                    raise PainterError('Bake group changed across existing texture sets; use New Project in Advanced')
+                peers = [other for other in high if pairs[other] == pairs[obj]]
+                index = peers.index(obj)
+                names[obj] = prefixes.pop() + '_high' + (f'_{index:03d}' if index else '')
+    if names and len(set(names.values())) != len(names):
+        raise PainterError('Final bake mesh names collide after project-name reuse; use New Project in Advanced')
+    if material_names and len(set(material_names)) != len(material_names):
+        raise PainterError('Associated texture-set names collide; use New Project in Advanced')
     output = Path(bpy.path.abspath(settings.output_dir)).resolve()
     output.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix=safe_name(settings.project_name) + '_', dir=output))
     try:
-        sets = export_meshes(context, low, directory / 'low.fbx', low=True, names=names, material_names=material_names)
-        export_meshes(context, high, directory / 'high.fbx', names=names)
+        sets = yield from export_steps(context, low, directory / 'low.fbx', low=True, names=names, material_names=material_names,
+                                       ignore_warnings=ignore_warnings)
+        yield from export_steps(context, high, directory / 'high.fbx', names=names)
         (directory / 'textures').mkdir()
         job = {
             'schema_version': SCHEMA_VERSION, 'job_id': str(uuid.uuid4()),
@@ -220,21 +294,29 @@ def prepare(context, automatic=False):
         }
         path = directory / 'job.json'
         path.write_text(json.dumps(job, indent=2), encoding='utf-8')
-    except Exception:
+    except BaseException:
         shutil.rmtree(directory, ignore_errors=True)
         raise
     settings.last_job = str(path)
     if automatic:
         settings.project_file = job['project_file']
         for obj, target in pairs.items():
-            obj.mbt_bake_target = target
+            if not isinstance(target, tuple):
+                obj.mbt_bake_target = target
     return f'Prepared {len(low)} low / {len(high)} high meshes. Painter has not been run.'
 
 
 def read_job(path):
     if not path:
         raise PainterError('Prepare a job or choose a job.json first')
-    job = json.loads(Path(bpy.path.abspath(path)).read_text(encoding='utf-8'))
+    resolved = Path(bpy.path.abspath(path))
+    try:
+        job = json.loads(resolved.read_text(encoding='utf-8'))
+    except FileNotFoundError as error:
+        raise PainterError(
+            f'Saved bake job.json is missing: {resolved}. Restore the original bake folder to keep '
+            'the associated painting, or choose New Project Next Bake to start fresh. '
+            'Existing Painter files will not be deleted.') from error
     if not isinstance(job, dict) or job.get('schema_version') != SCHEMA_VERSION:
         raise PainterError('Unsupported Painter job schema')
     if (not isinstance(job.get('job_id'), str) or not job['job_id']

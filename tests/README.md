@@ -52,6 +52,12 @@ Use the same invocation with one of these scripts:
 | `test_painter_bridge.py` | Transport and controlled Painter API behavior |
 | `test_painter_baking.py` | Bake configuration, cancellation, errors and save gating |
 | `test_painter_workflow.py` | Grouping, matching, project reuse and workflow regressions |
+| `test_painter_inputs.py` | Aggregated issues, popup actions, offset UV preservation, hidden/excluded collection restoration, many-to-many bake groups |
+| `test_painter_guard.py` | Controlled Painter window guard/watchdog and safe project opening; optional `-- --live-ui` launches/connects Painter and briefly hides/disables/restores its window without changing projects |
+| `test_painter_inputs_live.py` | Opt-in background `-- --live`: real two-low/one-high bake, offset islands, hidden collection and window protection; refuses existing projects, retains test files, closes only its exact test project |
+| `test_painter_runtime.py` | AUTO worker/main-thread handoff, cancellation, failure gates, scene/job changes, teardown/restart and real file reload |
+| `test_painter_preparation.py` | Staged preparation, cancellation at each yield, temporary/output cleanup, hidden-state restoration and early runtime cancellation |
+| `test_painter_performance.py` | Synthetic subdivided high-mesh preparation timings; system temp `mbt_painter_performance.json`; no Painter launch or fixed performance threshold |
 | `test_uv_suite.py` | UV packing, shapes, seams and rollback |
 
 Painter checks use controlled responses by default. Passing `-- --live` to the
@@ -60,6 +66,25 @@ a disposable project. These checks may launch Painter and leave a test project
 open. See SUBSTANCE_PAINTER.md in the project root before using live mode.
 
 ## Interactive Blender checks
+
+### Opt-in Painter live matrix
+
+`test_painter_live_workflow.py` requires `-- --live` in a disposable GUI Blender
+process. It launches/connects Painter, refuses any pre-existing open project,
+creates retained `MBToolkit_Painter_Matrix_*` artifacts, and exercises overlapping
+mesh groups, all maps, project reuse/renames/geometry changes, retained fill/paint
+layer markers, both ID sources, all AA choices, texture-only updates and both normal
+conventions. It saves/closes only its own exact project to change conventions and
+leaves the final project open. Check `result.json`, not just the process exit code.
+
+With that final project still open, run `test_painter_live_update.py` in another
+disposable GUI Blender process with `-- --live --blend <absolute-matrix-blend-path>`.
+It discovers the installed PBR Metallic Roughness preset's actual filenames,
+tests an explicit custom mapping, checks stale-AO removal and draws the Bake UI in
+a real popup layout. It creates `update_result.json` beside the retained blend.
+It neither bakes nor saves/closes Painter. It defers GUI work until after file-load
+context restoration. Both live scripts require result-file inspection; neither
+certifies brush-stroke reprojection, production assets or real OS input behavior.
 
 These need a real GUI; do **not** add `--background`. Use event simulation for
 the interactive group:
@@ -78,6 +103,7 @@ the interactive group:
 | `test_scene_initialization_live.py` | Scene initialization in an interactive process |
 | `test_scene_performance_live.py` | Scheduled collection, real selection and editor isolation |
 | `test_sidebar_sections_live.py` | Sidebar section UI drawing |
+| `test_painter_ui_live.py` | Painter real-layout collapsed/expanded/busy drawing, action icons and status; result in system temp `mbt_painter_ui_result.txt` |
 
 Several GUI scripts write result files (some under `C:\tmp`); inspect their output
 paths and create that directory if needed. Review both logs and result files:

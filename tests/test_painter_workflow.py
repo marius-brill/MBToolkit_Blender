@@ -74,6 +74,40 @@ def main():
         renamed = jobs.read_job(settings.last_job)
         assert renamed['texture_sets'][0]['texture_set'] == second['texture_sets'][0]['texture_set']
         assert renamed['mesh_names'][low.name] == second['mesh_names']['Retopo']
+        settings.normal_format = 'DIRECTX'
+        fails(lambda: jobs.prepare(bpy.context, automatic=True), 'Normal format changed')
+        settings.normal_format = 'OPENGL'
+        bpy.ops.mesh.primitive_cube_add()
+        extra_low = bpy.context.object
+        extra_low.name = 'Extra_low'
+        bpy.ops.mbt.painter_assign(role='LOW')
+        bpy.ops.mesh.primitive_cube_add()
+        extra_high = bpy.context.object
+        extra_high.name = 'Extra_high'
+        bpy.ops.mbt.painter_assign(role='HIGH')
+        fails(lambda: jobs.prepare(bpy.context, automatic=True), 'Low mesh membership changed')
+        # Prepare a new two-low association, then simulate damaged internal names.
+        settings.project_file = ''
+        settings.last_job = ''
+        jobs.prepare(bpy.context, automatic=True)
+        two_low = jobs.read_job(settings.last_job)
+        damaged = json.loads(json.dumps(two_low))
+        damaged['mesh_names'][extra_low.name] = damaged['mesh_names'][low.name]
+        with patch.object(jobs, 'read_job', return_value=damaged), \
+                patch.object(jobs, 'export_meshes') as export:
+            fails(lambda: jobs.prepare(bpy.context, automatic=True), 'Final bake mesh names collide')
+            export.assert_not_called()
+        damaged = json.loads(json.dumps(two_low))
+        damaged['texture_sets'][1]['texture_set'] = damaged['texture_sets'][0]['texture_set']
+        with patch.object(jobs, 'read_job', return_value=damaged), \
+                patch.object(jobs, 'export_meshes') as export:
+            fails(lambda: jobs.prepare(bpy.context, automatic=True), 'texture-set names collide')
+            export.assert_not_called()
+        bpy.data.objects.remove(extra_high, do_unlink=True)
+        bpy.data.objects.remove(extra_low, do_unlink=True)
+        settings.project_file = ''
+        settings.last_job = ''
+        jobs.prepare(bpy.context, automatic=True)
         project = settings.project_file
         settings.project_file = ''
         settings.project_template = str(Path(folder) / 'missing.spt')
@@ -92,7 +126,7 @@ def main():
         bpy.ops.mbt.painter_new_project()
         assert not settings.project_file and not settings.last_job
     addon.unregister()
-    print('PASS: collection moves, name/spatial/explicit matching, ambiguity, fresh snapshots, project reuse, template/export preflight', flush=True)
+    print('PASS: collection moves, matching, snapshots, project reuse, normal/membership guards, final-name collisions, template/export preflight', flush=True)
 
 
 def remote_update_tests():
@@ -122,7 +156,10 @@ def remote_update_tests():
         assert json.loads(namespace['_mbt_update'](str(manifest)))['state'] == 'RELOADING'
         assert project.reload_mesh.call_args.args[1]['preserve_strokes']
         callbacks.pop()(0)
-        assert json.loads(namespace['_mbt_status']())['state'] == 'COMPLETE'
+        completed = json.loads(namespace['_mbt_status']())
+        assert completed['state'] == 'COMPLETE'
+        assert completed['project_file'] == str(file)
+        assert completed['texture_sets'] == ['Body']
         namespace['_mbt_update'](str(manifest))
         callbacks.pop()(2)
         assert json.loads(namespace['_mbt_status']())['state'] == 'FAILED'
