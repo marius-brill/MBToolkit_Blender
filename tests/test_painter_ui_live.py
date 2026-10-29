@@ -46,6 +46,9 @@ def check():
         elif stage == 1:
             assert draws > 0 and not errors, errors
             settings = bpy.context.scene.mbt_painter
+            bpy.ops.mbt.painter_texture_set(action='ADD')
+            bpy.ops.mbt.painter_texture_set(action='ADD')
+            settings.texture_collection = settings.texture_sets[0].collection
             settings.bake_settings = True
             settings.advanced = True
             settings.preparation_timings = '[{"stage": "Snapshot high mesh: UI fixture", "seconds": 1.25}]'

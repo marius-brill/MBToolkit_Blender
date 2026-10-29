@@ -100,6 +100,11 @@ def main():
                 if isinstance(mesh, bpy.types.Mesh):
                     bpy.data.meshes.remove(mesh)
             bpy.data.scenes.remove(scene)
+        # Imported FBX materials outlive their disposable meshes. Release the
+        # reserved texture-set name before exporting another snapshot.
+        for material in list(bpy.data.materials):
+            if material.users == 0 and material.name == entry['texture_set']:
+                bpy.data.materials.remove(material)
         # Repeated jobs must not overwrite an earlier project.
         jobs.prepare(ctx)
         assert settings.last_job != first_job and Path(first_job).is_file()

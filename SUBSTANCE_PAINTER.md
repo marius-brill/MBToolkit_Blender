@@ -2,7 +2,7 @@
 
 ## Primary workflow: one Bake button
 
-Choose low/high collections and an output folder, then press **Bake**. The button
+Choose texture sets, their low/high collections and an output folder, then press **Bake**. The button
 validates inputs and material replacement policy, resolves bake pairs, exports fresh
 evaluated meshes, connects/launches Painter, creates or opens the associated project,
 reloads existing project geometry preserving strokes, bakes, saves, exports textures,
@@ -39,8 +39,29 @@ Set **Bake Group** on low/high meshes to share any number of lows and highs in o
 explicit group. For example, two lows and one high with group `Body` both use that
 high; one low and several highs also work. Shared `_low`/`_high` name prefixes are
 supported without a group override. Explicit groups take priority over stored targets.
-One texture set per low remains. Changing groups across existing project texture-set
-prefixes may require **New Project Next Bake** to preserve safe name matching.
+All low meshes share one **Default** texture set unless you add more sets.
+The **Texture Set** collection selector is at the top; its **+** creates a parent
+collection with Low/High child collections, and **−** removes only the setup entry
+(it keeps collections and objects). Choose an existing parent collection to add or
+switch sets. Existing Low/High setup is adopted by the default parent on first use.
+Each set owns its resolution, requested maps, front/rear distances, relative scale,
+antialiasing and ID source. Switching the parent selector switches these controls.
+Project name/output/template, normal format and replacement policy remain global.
+Matching is scoped to each set, independent of its shared texture material.
+Validate Setup uses that same scope. Surface matching compares distinct bake groups,
+using the nearest surface across all low members in each group, rather than making
+members of one group compete. Spatially distributed vertex samples and median/90th
+percentile distances reduce vertex-order and outlier bias. Genuine overlapping
+groups still require Bake Target or Bake Group; unresolved surface matches are
+reported together, with candidate scores or coverage/bounds rejection reasons.
+Name matching also accepts `.low`/`.high` and `-low`/`-high` role separators.
+Objects in a set share the same exported texture files and imported image datablocks;
+their UVs therefore share one space and should not overlap unintentionally.
+Existing per-object Painter projects require **New Project Next Bake** before
+switching to shared sets, as do changes to set/object membership. Existing project
+files are never deleted or silently merged. Set collection renames preserve an
+associated project's texture-set names. Changing bake groups may also require a
+new project to preserve safe name matching.
 
 ### Input warnings, hidden collections and offset UVs
 
@@ -50,6 +71,12 @@ request, or **Select Issue Meshes** to stop and reveal/select the affected objec
 Cancel leaves the scene unchanged. Missing UV maps, non-finite UVs, unusable geometry,
 linked data and singular transforms remain blocking; Ignore never silently drops meshes.
 Collapsed UV triangles and triangles crossing the bake-tile boundary are warnings.
+Quality warnings are checked on the evaluated/export mesh, so faces removed by
+modifiers do not cause source-only warnings. Reports include the UV-map name,
+triangle count and 1-based evaluated polygon numbers, and distinguish collapsed
+UVs on valid geometry from zero-area geometry. Evaluated polygon numbers may not
+correspond to source faces after topology-changing modifiers; Select Issue Meshes
+still selects objects, not individual evaluated faces.
 
 Hidden objects, collection viewport toggles and excluded collection ancestors in the
 active scene are temporarily made available for matching/evaluated export, then restored

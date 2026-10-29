@@ -172,6 +172,21 @@ def remote_tests():
             result = json.loads(namespace['_mbt_export'](str(manifest)))
             assert result['state'] == 'EXPORTED', result
             assert len(result['texture_sets'][0]['textures']) == 5
+            job['texture_sets'].append({'object': 'SecondCube', 'texture_set': 'MBT_Cube'})
+            job['set_definitions'] = [{'texture_set': 'MBT_Cube', 'resolution': 512}]
+            manifest.write_text(json.dumps(job), encoding='utf-8')
+            def shared_export(config):
+                assert len(config['exportList']) == 1
+                assert config['exportParameters'][-1] == {
+                    'filter': {'dataPaths': ['MBT_Cube']}, 'parameters': {'sizeLog2': 9}}
+                return export_files(config)
+            export.export_project_textures = shared_export
+            result = json.loads(namespace['_mbt_export'](str(manifest)))
+            assert result['state'] == 'EXPORTED', result
+            assert len(result['texture_sets']) == 2
+            assert result['texture_sets'][0]['textures'] == result['texture_sets'][1]['textures']
+            job.pop('set_definitions')
+            manifest.write_text(json.dumps(job), encoding='utf-8')
             project.file_path = lambda: str(Path(folder) / 'wrong.spp')
             assert 'does not match' in json.loads(namespace['_mbt_export'](str(manifest)))['error']
         state['edition'] = False

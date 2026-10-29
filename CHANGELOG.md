@@ -1,5 +1,16 @@
 # Changelog
 
+- Fix false Painter surface ambiguity between members of the same bake group;
+  match combined low surfaces with spatial samples and robust distance scores.
+- Scope Validate Setup to texture sets and aggregate unresolved surface matches
+  with candidate diagnostics. Accept dot/hyphen low/high role separators.
+- Report evaluated UV triangle counts, map names and face numbers; distinguish
+  zero-area geometry and avoid warnings for source faces removed by modifiers.
+
+- Add collection-backed Painter texture sets: shared default textures, Low/High
+  children, per-set resolution/maps/projection settings, scoped matching and shared
+  imported images. Protect existing per-object painting with an explicit new-project guard.
+
 ## Painter input and automation improvements
 
 - Aggregate mesh/UV issues in a warning dialog with investigate/select and per-job

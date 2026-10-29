@@ -55,7 +55,8 @@ def main():
         parent = bpy.data.collections.new('HiddenParent')
         ctx.scene.collection.children.link(parent)
         parent.children.link(settings.low_collection)
-        ctx.scene.collection.children.unlink(settings.low_collection)
+        settings.texture_collection.children.unlink(settings.low_collection)
+        settings.texture_collection.children.link(parent)
         parent.hide_viewport = True
         parent.hide_select = True
         layer = ctx.view_layer.layer_collection.children[parent.name]

@@ -44,7 +44,24 @@ def validate_steps(context, ignore_warnings=False):
     settings = context.scene.mbt_painter
     if context.mode != 'OBJECT':
         raise PainterError('Switch to Object Mode before preparing a job')
-    low, high = meshes(settings.low_collection), meshes(settings.high_collection)
+    from .texture_sets import entries
+    groups = entries(settings)
+    low, high = [], []
+    for entry in groups:
+        lows, highs = meshes(entry.low_collection), meshes(entry.high_collection)
+        if not lows or not highs:
+            raise PainterError('Choose non-empty low-poly and high-poly mesh collections for every texture set')
+        if set(lows + highs) & set(low + high):
+            raise PainterError('Mesh objects must not belong to multiple texture sets')
+        if not entry.bake_maps:
+            raise PainterError('Select at least one bake map for every texture set')
+        if hasattr(entry, 'collection'):
+            parent = entry.collection
+            if parent is None or any(child not in parent.children_recursive for child in
+                                     (entry.low_collection, entry.high_collection)):
+                raise PainterError('Each texture set must contain its low/high child collections')
+        low.extend(lows)
+        high.extend(highs)
     if not low or not high:
         raise PainterError('Choose non-empty low-poly and high-poly mesh collections')
     if set(low) & set(high):
@@ -71,7 +88,8 @@ def validate_steps(context, ignore_warnings=False):
             issue(obj, 'transform has zero scale')
         if obj in low:
             try:
-                validate_uv(obj.data, obj.name, ignore_warnings=ignore_warnings)
+                # Quality warnings describe the exported surface, not faces removed by modifiers.
+                validate_uv(obj.data, obj.name, ignore_warnings=True)
             except ValidationIssues as error:
                 issues.extend(error.issues)
         depsgraph = context.evaluated_depsgraph_get()
@@ -82,7 +100,7 @@ def validate_steps(context, ignore_warnings=False):
                 issue(obj, 'evaluated mesh has no faces')
             elif obj in low:
                 try:
-                    validate_uv(mesh, obj.name, ignore_warnings=ignore_warnings)
+                    validate_uv(mesh, obj.name, ignore_warnings=ignore_warnings, stage='evaluated/export mesh')
                 except ValidationIssues as error:
                     for entry in error.issues:
                         if entry not in issues:
@@ -100,7 +118,7 @@ def validate_steps(context, ignore_warnings=False):
     return low, high
 
 
-def validate_uv(mesh, name, ignore_warnings=False):
+def validate_uv(mesh, name, ignore_warnings=False, stage='mesh'):
     uv = mesh.uv_layers.active
     if uv is None:
         raise ValidationIssues([{'object': name, 'reason': 'low-poly mesh needs an active UV map', 'blocking': True}])
@@ -108,19 +126,41 @@ def validate_uv(mesh, name, ignore_warnings=False):
     coords = [item.uv for item in uv.data]
     if any(not math.isfinite(v) for co in coords for v in co):
         raise ValidationIssues([{'object': name, 'reason': 'UVs must be finite', 'blocking': True}])
-    warnings = set()
+    if ignore_warnings:
+        return
+    warnings = {}
+    def warn(reason, triangle):
+        entry = warnings.setdefault(reason, {'count': 0, 'faces': set()})
+        entry['count'] += 1
+        entry['faces'].add(triangle.polygon_index)
     mesh.calc_loop_triangles()
     for triangle in mesh.loop_triangles:
         a, b, c = (coords[index] for index in triangle.loops)
         if any(max(co[i] for co in (a, b, c)) <= 0 or min(co[i] for co in (a, b, c)) >= 1 for i in range(2)):
             continue
         if any(v < -1e-6 or v > 1 + 1e-6 for co in (a, b, c) for v in co):
-            warnings.add('UV triangles cross the 0–1 bake-tile boundary')
+            warn('UV triangles cross the 0–1 bake-tile boundary', triangle)
         area = (b.x-a.x)*(c.y-a.y) - (b.y-a.y)*(c.x-a.x)
         if abs(area) < 1e-12:
-            warnings.add('UVs contain collapsed triangles')
+            points = [mesh.vertices[index].co for index in triangle.vertices]
+            edge_a, edge_b = points[1] - points[0], points[2] - points[0]
+            geometric_scale = max(edge_a.length_squared, edge_b.length_squared)
+            degenerate = edge_a.cross(edge_b).length_squared <= geometric_scale ** 2 * 1e-24
+            reason = ('Zero-area geometry triangles also have collapsed UVs' if degenerate
+                      else 'UVs contain collapsed triangles on nonzero-area geometry')
+            warn(reason, triangle)
     if warnings and not ignore_warnings:
-        raise ValidationIssues([{'object': name, 'reason': reason, 'blocking': False} for reason in sorted(warnings)])
+        issues = []
+        for reason, entry in sorted(warnings.items()):
+            faces = sorted(entry['faces'])
+            preview = ', '.join(str(index + 1) for index in faces[:12])
+            if len(faces) > 12:
+                preview += ', …'
+            issues.append({'object': name, 'blocking': False, 'uv_map': uv.name,
+                           'stage': stage, 'faces': faces, 'triangle_count': entry['count'],
+                           'reason': f"{reason}: {entry['count']} triangle(s), UV map '{uv.name}', {stage}; "
+                                     f'faces (1-based): {preview}'})
+        raise ValidationIssues(issues)
 
 
 def export_meshes(context, objects, filepath, low=False, names=None, material_names=None, ignore_warnings=False):
@@ -135,6 +175,7 @@ def export_steps(context, objects, filepath, low=False, names=None, material_nam
     scene.unit_settings.system = context.scene.unit_settings.system
     scene.unit_settings.scale_length = context.scene.unit_settings.scale_length
     temporary_objects, temporary_meshes, temporary_materials = [], [], []
+    shared_materials, exported_sets = {}, []
     try:
         for index, source in enumerate(objects):
             yield 'Snapshot ' + ('low' if low else 'high') + ' mesh: ' + source.name
@@ -146,15 +187,19 @@ def export_steps(context, objects, filepath, low=False, names=None, material_nam
             if not mesh.polygons:
                 raise PainterError(f'{source.name}: evaluated mesh has no faces')
             if low:
-                validate_uv(mesh, source.name, ignore_warnings=ignore_warnings)
-            # Unique material per low object gives deterministic Painter texture-set names.
+                validate_uv(mesh, source.name, ignore_warnings=ignore_warnings, stage='evaluated/export mesh')
+            # One temporary material per collection-backed set, shared by its low meshes.
             if low:
                 mesh.materials.clear()
-                material = bpy.data.materials.new(material_names[index] if material_names else 'MBT_' + safe_name(source.name))
-                if material_names and material.name != material_names[index]:
+                expected_material = material_names[index] if material_names else 'MBT_Default'
+                material = shared_materials.get(expected_material)
+                if material is None:
+                    material = bpy.data.materials.new(expected_material)
                     temporary_materials.append(material)
-                    raise PainterError('Texture-set material name is occupied; rename the conflicting material')
-                temporary_materials.append(material)
+                    if material.name != expected_material:
+                        raise PainterError('Texture-set material name is occupied; rename the conflicting material')
+                    shared_materials[expected_material] = material
+                exported_sets.append(material.name)
                 mesh.materials.append(material)
                 for polygon in mesh.polygons:
                     polygon.material_index = 0
@@ -178,7 +223,7 @@ def export_steps(context, objects, filepath, low=False, names=None, material_nam
                 apply_unit_scale=True, add_leaf_bones=False)
         if result != {'FINISHED'} or not filepath.is_file():
             raise PainterError('FBX export did not finish')
-        return [mat.name for mat in temporary_materials]
+        return exported_sets
     finally:
         for obj in temporary_objects:
             bpy.data.objects.remove(obj, do_unlink=True)
@@ -227,9 +272,30 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
                 or len(set(custom['channels'].values())) != len(custom['channels'])):
             raise PainterError('Export mapping needs preset URL and unpacked PNG channels containing {texture_set}')
     low, high = yield from validate_steps(context, ignore_warnings=ignore_warnings)
+    from .texture_sets import entries, ensure_default
+    ensure_default(context)
+    groups = entries(settings)
+    owners = {obj: entry for entry in groups for obj in meshes(entry.low_collection)}
+    group_names = {entry.as_pointer(): 'MBT_' + safe_name(entry.collection.name if hasattr(entry, 'collection') else 'Default')
+                   for entry in groups}
+    if len(set(group_names.values())) != len(group_names):
+        raise PainterError('Texture-set collection names collide after sanitization')
     if automatic:
         from .matching import resolve_steps
-        names, pairs = yield from resolve_steps(context, low, high)
+        names, pairs = {}, {}
+        matching_issues = []
+        for index, entry in enumerate(groups):
+            try:
+                scoped_names, scoped_pairs = yield from resolve_steps(context, meshes(entry.low_collection), meshes(entry.high_collection))
+            except ValidationIssues as error:
+                matching_issues.extend(error.issues)
+                continue
+            if len(groups) > 1:
+                scoped_names = {obj: f'MBTSet_{index:03d}_' + name for obj, name in scoped_names.items()}
+            names.update(scoped_names)
+            pairs.update(scoped_pairs)
+        if matching_issues:
+            raise ValidationIssues(matching_issues)
         from .materials import owned
         if not settings.replace_materials:
             protected = [obj.name for obj in low if any(slot.material and not owned(slot.material, obj)
@@ -242,11 +308,21 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
         if not obj.get('mbt_painter_id') or obj['mbt_painter_id'] in ids:
             obj['mbt_painter_id'] = str(uuid.uuid4())
         ids.add(obj['mbt_painter_id'])
-    material_names = None
+    material_names = [group_names[owners[obj].as_pointer()] for obj in low]
     if previous:
         by_id = {entry.get('object_id'): entry for entry in previous['texture_sets']}
         if set(by_id) != ids:
             raise PainterError('Low mesh membership changed; use New Project in Advanced to protect existing painting')
+        definitions = previous.get('set_definitions')
+        current_membership = {obj['mbt_painter_id']: getattr(owners[obj], 'set_id', 'default') for obj in low}
+        previous_membership = {entry['object_id']: entry.get('set_id', 'default') for entry in previous['texture_sets']}
+        if not definitions or current_membership != previous_membership:
+            raise PainterError('Texture-set membership changed; use New Project in Advanced to protect existing painting')
+        defined_names = {entry['set_id']: entry['texture_set'] for entry in definitions}
+        if (len(set(defined_names.values())) != len(groups) or any(
+                entry['texture_set'] != defined_names.get(entry.get('set_id'))
+                for entry in previous['texture_sets'])):
+            raise PainterError('Associated texture-set names collide or differ; use New Project in Advanced')
         material_names = [by_id[obj['mbt_painter_id']]['texture_set'] for obj in low]
         if names:
             for target in low:
@@ -264,7 +340,7 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
                 names[obj] = prefixes.pop() + '_high' + (f'_{index:03d}' if index else '')
     if names and len(set(names.values())) != len(names):
         raise PainterError('Final bake mesh names collide after project-name reuse; use New Project in Advanced')
-    if material_names and len(set(material_names)) != len(material_names):
+    if previous and len(set(material_names)) != len(groups):
         raise PainterError('Associated texture-set names collide; use New Project in Advanced')
     output = Path(bpy.path.abspath(settings.output_dir)).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -286,8 +362,15 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
             'match_method': 'BY_NAME' if automatic else 'ALWAYS', 'apply_modifiers': True,
             'mesh_names': {obj.name: name for obj, name in (names or {}).items()},
             'baking': bake_settings(settings),
+            'set_definitions': [
+                {'set_id': getattr(entry, 'set_id', 'default'),
+                 'texture_set': material_names[low.index(meshes(entry.low_collection)[0])],
+                 'resolution': int(entry.resolution), 'bake_maps': sorted(entry.bake_maps),
+                 'baking': bake_settings(entry)} for entry in groups],
             'texture_sets': [
-                {'object': obj.name, 'object_id': obj['mbt_painter_id'], 'texture_set': texture_set, 'uv_map': obj.data.uv_layers.active.name,
+                {'object': obj.name, 'object_id': obj['mbt_painter_id'],
+                 'set_id': getattr(owners[obj], 'set_id', 'default'),
+                 'texture_set': texture_set, 'uv_map': obj.data.uv_layers.active.name,
                  'textures': {channel: str(directory / 'textures' / f'{texture_set}_{suffix}.png')
                               for channel, suffix in CHANNELS.items()}}
                 for obj, texture_set in zip(low, sets)],
@@ -337,6 +420,28 @@ def read_job(path):
         if entry['object'] in seen:
             raise PainterError('Duplicate object in job manifest')
         seen.add(entry['object'])
+    if 'set_definitions' in job:
+        definitions = job['set_definitions']
+        if not isinstance(definitions, list) or not definitions:
+            raise PainterError('Invalid texture-set definitions')
+        identities, names = set(), set()
+        for definition in definitions:
+            if (not isinstance(definition, dict)
+                    or not isinstance(definition.get('set_id'), str) or not definition['set_id']
+                    or not isinstance(definition.get('texture_set'), str) or not definition['texture_set']
+                    or definition.get('resolution') not in (512, 1024, 2048, 4096, 8192)
+                    or not isinstance(definition.get('bake_maps'), list) or not definition['bake_maps']
+                    or not isinstance(definition.get('baking'), dict)):
+                raise PainterError('Invalid texture-set definition')
+            if definition['set_id'] in identities or definition['texture_set'] in names:
+                raise PainterError('Duplicate texture-set definition')
+            identities.add(definition['set_id'])
+            names.add(definition['texture_set'])
+        by_id = {definition['set_id']: definition['texture_set'] for definition in definitions}
+        if (any(entry.get('set_id') not in by_id or by_id[entry['set_id']] != entry['texture_set']
+                for entry in job['texture_sets'])
+                or {entry['texture_set'] for entry in job['texture_sets']} != names):
+            raise PainterError('Texture-set membership differs from definitions')
     return job
 
 
@@ -390,6 +495,17 @@ def update_bake_settings(path, settings):
         raise PainterError('Select at least one bake map')
     job.update(baking=bake_settings(settings), bake_maps=sorted(settings.bake_maps),
                resolution=int(settings.resolution))
+    if job.get('set_definitions'):
+        from .texture_sets import entries
+        by_id = {getattr(entry, 'set_id', 'default'): entry for entry in entries(settings)}
+        if set(by_id) != {entry['set_id'] for entry in job['set_definitions']}:
+            raise PainterError('Texture sets changed; prepare a new bake first')
+        for definition in job['set_definitions']:
+            entry = by_id[definition['set_id']]
+            if not entry.bake_maps:
+                raise PainterError('Select at least one bake map for every texture set')
+            definition.update(resolution=int(entry.resolution), bake_maps=sorted(entry.bake_maps),
+                              baking=bake_settings(entry))
     destination = Path(bpy.path.abspath(path))
     temporary = destination.with_suffix('.json.tmp')
     try:

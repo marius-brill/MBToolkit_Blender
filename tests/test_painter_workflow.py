@@ -98,7 +98,8 @@ def main():
             fails(lambda: jobs.prepare(bpy.context, automatic=True), 'Final bake mesh names collide')
             export.assert_not_called()
         damaged = json.loads(json.dumps(two_low))
-        damaged['texture_sets'][1]['texture_set'] = damaged['texture_sets'][0]['texture_set']
+        assert two_low['texture_sets'][1]['texture_set'] == two_low['texture_sets'][0]['texture_set']
+        damaged['texture_sets'][1]['texture_set'] = 'UnexpectedSet'
         with patch.object(jobs, 'read_job', return_value=damaged), \
                 patch.object(jobs, 'export_meshes') as export:
             fails(lambda: jobs.prepare(bpy.context, automatic=True), 'texture-set names collide')

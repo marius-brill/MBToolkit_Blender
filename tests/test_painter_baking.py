@@ -162,6 +162,37 @@ def configuration_tests():
         assert json.loads(namespace['_mbt_bake'](str(manifest)))['state'] == 'FAILED'
         assert json.loads(namespace['_mbt_bake_status']())['state'] == 'FAILED'
         assert not callbacks
+        # Distinct sets must not inherit the active Blender set's bake settings.
+        baking.bake_selected_textures_async.side_effect = None
+        first_set = Mock()
+        first_set.name.return_value = 'MBT_Test'
+        second_set = Mock()
+        second_set.name.return_value = 'MBT_Detail'
+        textures.all_texture_sets = lambda: [first_set, second_set]
+        textures.Resolution = lambda width, height: (width, height)
+        other_common = {key: Property() for key in common}
+        other_params = Mock()
+        other_params.common.return_value = other_common
+        baking.BakingParameters.from_texture_set.side_effect = lambda ts: params if ts == first_set else other_params
+        job['texture_sets'].append({'texture_set': 'MBT_Test'})
+        job['texture_sets'].append({'texture_set': 'MBT_Detail'})
+        job['set_definitions'] = [
+            {'texture_set': 'MBT_Test', 'resolution': 1024, 'bake_maps': ['NORMAL'], 'baking': job['baking']},
+            {'texture_set': 'MBT_Detail', 'resolution': 2048, 'bake_maps': ['AO'],
+             'baking': dict(job['baking'], front_distance=0.15)}]
+        manifest.write_text(json.dumps(job), encoding='utf-8')
+        params.reset_mock()
+        assert json.loads(namespace['_mbt_bake'](str(manifest)))['state'] == 'BAKING'
+        values = baking.BakingParameters.set.call_args.args[0]
+        assert values[common['OutputSize']] == (10, 10)
+        assert values[other_common['OutputSize']] == (11, 11)
+        assert values[other_common['MaxHeight']] == 0.15
+        first_set.set_resolution.assert_called_once_with((1024, 1024))
+        second_set.set_resolution.assert_called_once_with((2048, 2048))
+        params.set_baker_enabled.assert_any_call(usages.AO, False)
+        other_params.set_baker_enabled.assert_any_call(usages.AO, True)
+        other_params.set_baker_enabled.assert_any_call(usages.Normal, False)
+        callbacks['ended'](types.SimpleNamespace(status='success'))
     print('PASS: bake configuration, events, terminal states, save gating and startup cleanup', flush=True)
 
 

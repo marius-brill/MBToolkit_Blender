@@ -1,6 +1,6 @@
 """Blend-file-local settings for the Painter handoff."""
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, IntProperty, PointerProperty, StringProperty
 from ...core.registry import register_classes, unregister_classes
 
 
@@ -11,7 +11,64 @@ BAKE_MAPS = (
 )
 
 
+SET_FIELDS = ('low_collection', 'high_collection', 'resolution', 'bake_maps',
+              'front_distance', 'rear_distance', 'relative_distance', 'antialiasing', 'id_source')
+_syncing = False
+
+
+def save_active(self, context):
+    if not _syncing and self.texture_sets and 0 <= self.active_texture_set < len(self.texture_sets):
+        entry = self.texture_sets[self.active_texture_set]
+        for field in SET_FIELDS:
+            setattr(entry, field, getattr(self, field))
+        parent = entry.collection
+        if parent and not parent.library:
+            for child in (entry.low_collection, entry.high_collection):
+                if (child and not child.library and child != parent
+                        and parent not in child.children_recursive and child.name not in parent.children):
+                    parent.children.link(child)
+                    if context and child.name in context.scene.collection.children:
+                        context.scene.collection.children.unlink(child)
+
+
+def select_active(self, context):
+    global _syncing
+    if _syncing:
+        return
+    _syncing = True
+    try:
+        if self.texture_sets and 0 <= self.active_texture_set < len(self.texture_sets):
+            entry = self.texture_sets[self.active_texture_set]
+            self.texture_collection = entry.collection
+            for field in SET_FIELDS:
+                setattr(self, field, getattr(entry, field))
+        else:
+            self.texture_collection = None
+    finally:
+        _syncing = False
+
+
+def select_collection(self, context):
+    if _syncing:
+        return
+    if self.texture_collection is None:
+        select_active(self, context)
+        return
+    from .texture_sets import add_set
+    for index, entry in enumerate(self.texture_sets):
+        if entry.collection == self.texture_collection:
+            self.active_texture_set = index
+            return
+    try:
+        add_set(context, self.texture_collection)
+    except ValueError as error:
+        self.report = str(error)
+        select_active(self, context)
+
+
 class MBT_PainterSettings(bpy.types.PropertyGroup):
+    texture_collection: PointerProperty(name='Texture Set', type=bpy.types.Collection, update=select_collection)
+    active_texture_set: IntProperty(default=0, min=0, update=select_active)
     low_collection: PointerProperty(name='Low Poly', type=bpy.types.Collection)
     high_collection: PointerProperty(name='High Poly', type=bpy.types.Collection)
     project_name: StringProperty(name='Project', default='Asset')
@@ -51,7 +108,20 @@ class MBT_PainterSettings(bpy.types.PropertyGroup):
         description='JSON timings for preparation steps, excluding time between UI ticks')
 
 
-classes = (MBT_PainterSettings,)
+class MBT_PainterTextureSet(bpy.types.PropertyGroup):
+    collection: PointerProperty(name='Texture Set', type=bpy.types.Collection)
+    set_id: StringProperty(options={'HIDDEN'})
+
+
+# Keep the active-set UI fields compatible with existing scripts and blend files.
+# The collection entries own the persisted values; these fields mirror the selection.
+for _field in SET_FIELDS:
+    _property = MBT_PainterSettings.__annotations__[_field]
+    MBT_PainterTextureSet.__annotations__[_field] = _property.function(**_property.keywords)
+    MBT_PainterSettings.__annotations__[_field] = _property.function(**dict(_property.keywords, update=save_active))
+MBT_PainterSettings.__annotations__['texture_sets'] = CollectionProperty(type=MBT_PainterTextureSet)
+
+classes = (MBT_PainterTextureSet, MBT_PainterSettings)
 
 
 def register():

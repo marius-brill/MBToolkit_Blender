@@ -92,9 +92,9 @@ def available(context, objects, restore=True):
 def bake_inputs(function):
     @wraps(function)
     def wrapped(context, *args, **kwargs):
-        from .jobs import meshes
+        from .texture_sets import inputs
         settings = context.scene.mbt_painter
-        with available(context, meshes(settings.low_collection) + meshes(settings.high_collection)):
+        with available(context, inputs(settings)):
             return function(context, *args, **kwargs)
     return wrapped
 
@@ -103,9 +103,9 @@ def bake_steps(function):
     """Keep hidden inputs available until a staged job finishes or is closed."""
     @wraps(function)
     def wrapped(context, *args, **kwargs):
-        from .jobs import meshes
+        from .texture_sets import inputs
         settings = context.scene.mbt_painter
-        with available(context, meshes(settings.low_collection) + meshes(settings.high_collection)):
+        with available(context, inputs(settings)):
             return (yield from function(context, *args, **kwargs))
     return wrapped
 

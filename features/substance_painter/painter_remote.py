@@ -20,6 +20,18 @@ def _mbt_probe():
     })
 
 
+def _mbt_set_options(job):
+    return {entry['texture_set']: entry for entry in job.get('set_definitions', [])}
+
+
+def _mbt_set_resolutions(job):
+    options = _mbt_set_options(job)
+    for ts in _mbt_textureset.all_texture_sets():
+        if ts.name() in options:
+            size = options[ts.name()]['resolution']
+            ts.set_resolution(_mbt_textureset.Resolution(size, size))
+
+
 def _mbt_guard_touch():
     import time
     globals()['_mbt_guard_deadline'] = time.monotonic() + 300
@@ -95,11 +107,12 @@ def _mbt_status():
         if _mbt_state['state'] == 'OPENING':
             return _mbt_update(_mbt_state['job_path'])
         job = _mbt_json.loads(_MBTPath(_mbt_state['job_path']).read_text(encoding='utf-8'))
-        if sorted(ts.name() for ts in _mbt_textureset.all_texture_sets()) != sorted(e['texture_set'] for e in job['texture_sets']):
+        if sorted(ts.name() for ts in _mbt_textureset.all_texture_sets()) != sorted({e['texture_set'] for e in job['texture_sets']}):
             _mbt_state.update(state='FAILED', error='Texture sets changed during mesh reload; baking stopped')
         else:
+            _mbt_set_resolutions(job)
             _mbt_state.update(state='COMPLETE', project_file=job['project_file'],
-                              texture_sets=sorted(e['texture_set'] for e in job['texture_sets']))
+                              texture_sets=sorted({e['texture_set'] for e in job['texture_sets']}))
     if (_mbt_state.get('state') == 'CREATING' and _mbt_project.is_in_edition_state()
             and not _mbt_project.is_busy()):
         _mbt_finish()
@@ -137,9 +150,10 @@ def _mbt_create(job_path):
                 if not _mbt_project.is_in_edition_state():
                     raise RuntimeError('Painter project did not enter edition state')
                 actual = sorted(item.name() for item in _mbt_textureset.all_texture_sets())
-                expected = sorted(item['texture_set'] for item in job['texture_sets'])
+                expected = sorted({item['texture_set'] for item in job['texture_sets']})
                 if actual != expected:
                     raise RuntimeError(f'Texture sets differ: expected {expected}, got {actual}')
+                _mbt_set_resolutions(job)
                 if _MBTPath(job['project_file']).exists():
                     raise RuntimeError('Project file already exists; refusing overwrite')
                 _mbt_project.save_as(job['project_file'])
@@ -206,7 +220,7 @@ def _mbt_export(job_path):
         if not current or _MBTPath(current).resolve() != _MBTPath(job['project_file']).resolve():
             raise RuntimeError('Open Painter project does not match the Blender setup. Open the associated project before updating textures.')
         actual = sorted(item.name() for item in _mbt_textureset.all_texture_sets())
-        if actual != sorted(item['texture_set'] for item in job['texture_sets']):
+        if actual != sorted({item['texture_set'] for item in job['texture_sets']}):
             raise RuntimeError('Painter texture sets do not match the active job')
         # Unique directory avoids mistaking stale files for a successful export.
         parent = _MBTPath(job_path).resolve().parent / 'textures'
@@ -233,6 +247,11 @@ def _mbt_export(job_path):
                       'dithering': False, 'sizeLog2': int(math.log2(job['resolution'])),
                       'paddingAlgorithm': 'infinite'}}]}
         custom = job.get('custom_export')
+        set_options = _mbt_set_options(job)
+        if set_options:
+            for item in config['exportList']:
+                config['exportParameters'].append({'filter': {'dataPaths': [item['rootPath']]},
+                    'parameters': {'sizeLog2': int(math.log2(set_options[item['rootPath']]['resolution']))}})
         if custom:
             config['defaultExportPreset'] = custom['preset']
             del config['exportPresets']
@@ -300,15 +319,21 @@ def _mbt_bake(job_path):
         if not requested or any(name not in mapping for name in requested):
             raise RuntimeError('Invalid bake-map selection')
         texture_sets = _mbt_textureset.all_texture_sets()
-        if sorted(ts.name() for ts in texture_sets) != sorted(e['texture_set'] for e in job['texture_sets']):
+        if sorted(ts.name() for ts in texture_sets) != sorted({e['texture_set'] for e in job['texture_sets']}):
             raise RuntimeError('Painter texture sets do not match job')
-        options = job['baking']
+        set_options = _mbt_set_options(job)
+        _mbt_set_resolutions(job)
         changes = {}
         plans = []
         for ts in texture_sets:
+            definition = set_options.get(ts.name(), job)
+            options = definition['baking']
+            requested = definition['bake_maps']
+            if not requested or any(name not in mapping for name in requested):
+                raise RuntimeError('Invalid bake-map selection for ' + ts.name())
             params = baking.BakingParameters.from_texture_set(ts)
             common = params.common()
-            values = {'OutputSize': (int(math.log2(job['resolution'])),) * 2,
+            values = {'OutputSize': (int(math.log2(definition['resolution'])),) * 2,
                       'HipolyMesh': high.resolve().as_uri(),
                       'LowAsHigh': False,
                       'MaxHeight': options['front_distance'],
@@ -333,9 +358,9 @@ def _mbt_bake(job_path):
             if 'ID' in requested:
                 prop = params.baker(usages['ID'])['ColorSource']
                 changes[prop] = prop.enum_value(options['id_source'])
-            plans.append((params, usages))
+            plans.append((params, usages, requested))
         baking.BakingParameters.set(changes)
-        for params, usages in plans:
+        for params, usages, requested in plans:
             params.set_textureset_enabled(True)
             selected = {usages[name] for name in requested}
             for usage in (getattr(_mbt_textureset.MeshMapUsage, name)

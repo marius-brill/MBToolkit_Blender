@@ -93,15 +93,20 @@ def import_maps(context):
 
     # Preload every image and stage every graph before changing any object's slots.
     staged, loaded = [], []
+    shared_images = {}
     missing = []
     try:
         for obj, entry, files in targets:
             images = {}
             for channel, path in files.items():
                 # Dedicated datablocks avoid changing color spaces of unrelated image users.
-                image = bpy.data.images.load(str(path), check_existing=False)
-                loaded.append(image)
-                image.colorspace_settings.name = 'sRGB' if channel == 'base_color' else 'Non-Color'
+                key = (channel, path)
+                image = shared_images.get(key)
+                if image is None:
+                    image = bpy.data.images.load(str(path), check_existing=False)
+                    loaded.append(image)
+                    image.colorspace_settings.name = 'sRGB' if channel == 'base_color' else 'Non-Color'
+                    shared_images[key] = image
                 images[channel] = image
             material = bpy.data.materials.new('MBT_' + entry['texture_set'])
             staged.append((obj, entry, material, images))

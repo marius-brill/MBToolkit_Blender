@@ -61,6 +61,36 @@ class MBT_OT_painter_issues(bpy.types.Operator):
         return operator(action=self.action, ignore_warnings=True)
 
 
+class MBT_OT_painter_texture_set(bpy.types.Operator):
+    bl_idname = 'mbt.painter_texture_set'
+    bl_label = 'Edit Texture Sets'
+    bl_options = {'REGISTER', 'UNDO'}
+    action: EnumProperty(items=(('ADD', 'Add Texture Set', ''),
+                                ('REMOVE', 'Remove Texture Set', 'Keep its collection and meshes')))
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene is not None and not runtime.busy()
+
+    def execute(self, context):
+        from .texture_sets import add_set, ensure_default
+        from .settings import select_active
+        settings = context.scene.mbt_painter
+        if self.action == 'ADD':
+            if not settings.texture_sets:
+                ensure_default(context)
+            else:
+                add_set(context)
+        elif len(settings.texture_sets) > 1:
+            settings.texture_sets.remove(settings.active_texture_set)
+            settings.active_texture_set = min(settings.active_texture_set, len(settings.texture_sets) - 1)
+            select_active(settings, context)
+        else:
+            self.report({'WARNING'}, 'Keep at least one texture set')
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
 class MBT_OT_painter_assign(bpy.types.Operator):
     bl_idname = 'mbt.painter_assign'
     bl_label = 'Move Selected Meshes to Bake Collection'
@@ -90,9 +120,16 @@ class MBT_OT_painter_assign(bpy.types.Operator):
             self.report({'WARNING'}, 'Choose a local collection')
             return {'CANCELLED'}
         if collection is None:
-            collection = bpy.data.collections.new('MBT_' + self.role.title())
-            context.scene.collection.children.link(collection)
-            setattr(settings, attribute, collection)
+            from .texture_sets import ensure_default
+            entry = ensure_default(context)
+            collection = getattr(settings, attribute)
+            if collection is None:
+                collection = bpy.data.collections.new(entry.collection.name + '_' + self.role.title())
+                entry.collection.children.link(collection)
+                setattr(settings, attribute, collection)
+        elif not settings.texture_sets:
+            from .texture_sets import ensure_default
+            ensure_default(context)
         for obj in objects:
             if obj.name not in collection.objects:
                 collection.objects.link(obj)
@@ -118,8 +155,8 @@ class MBT_OT_painter_action(bpy.types.Operator):
         try:
             if self.action == 'VALIDATE':
                 low, high = jobs.validate(context, ignore_warnings=self.ignore_warnings)
-                from .matching import resolve
-                resolve(context, low, high)
+                from .matching import resolve_sets
+                resolve_sets(context)
                 message = f'Valid setup: {len(low)} low / {len(high)} high meshes; all pairs resolved'
             elif self.action == 'PREPARE':
                 message = jobs.prepare(context, ignore_warnings=self.ignore_warnings)
@@ -210,7 +247,7 @@ class MBT_OT_painter_cancel(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (MBT_OT_painter_issues, MBT_OT_painter_assign, MBT_OT_painter_action, MBT_OT_painter_connect,
+classes = (MBT_OT_painter_issues, MBT_OT_painter_texture_set, MBT_OT_painter_assign, MBT_OT_painter_action, MBT_OT_painter_connect,
            MBT_OT_painter_new_project, MBT_OT_painter_cancel)
 
 

@@ -22,6 +22,13 @@ def draw(layout, context):
     root = layout
     layout = controls
     layout.label(text='Substance Painter — Blender Setup')
+    row = layout.row(align=True)
+    row.prop(props, 'texture_collection')
+    row.operator('mbt.painter_texture_set', text='', icon='ADD').action = 'ADD'
+    remove = row.row(align=True)
+    remove.enabled = len(props.texture_sets) > 1
+    remove.operator('mbt.painter_texture_set', text='', icon='REMOVE').action = 'REMOVE'
+    layout.label(text='All low meshes in this set share textures')
     for role, attribute in (('LOW', 'low_collection'), ('HIGH', 'high_collection')):
         row = layout.row(align=True)
         row.prop(props, attribute)

@@ -52,7 +52,9 @@ Use the same invocation with one of these scripts:
 | `test_painter_bridge.py` | Transport and controlled Painter API behavior |
 | `test_painter_baking.py` | Bake configuration, cancellation, errors and save gating |
 | `test_painter_workflow.py` | Grouping, matching, project reuse and workflow regressions |
+| `test_painter_texture_sets.py` | Shared default set, parent/child collections, per-set controls, real FBX material sharing, shared image import, rebake, persistence and legacy protection |
 | `test_painter_inputs.py` | Aggregated issues, popup actions, offset UV preservation, hidden/excluded collection restoration, many-to-many bake groups |
+| `test_painter_matching_diagnostics.py` | Group-union surface matching, true ambiguity aggregation, distant rejection, spatial samples, scoped validation and evaluated UV diagnostics |
 | `test_painter_guard.py` | Controlled Painter window guard/watchdog and safe project opening; optional `-- --live-ui` launches/connects Painter and briefly hides/disables/restores its window without changing projects |
 | `test_painter_inputs_live.py` | Opt-in background `-- --live`: real two-low/one-high bake, offset islands, hidden collection and window protection; refuses existing projects, retains test files, closes only its exact test project |
 | `test_painter_runtime.py` | AUTO worker/main-thread handoff, cancellation, failure gates, scene/job changes, teardown/restart and real file reload |
