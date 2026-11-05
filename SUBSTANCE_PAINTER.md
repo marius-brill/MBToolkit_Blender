@@ -5,15 +5,16 @@
 The **MBT Baking** N-panel is separate from the **MBToolkit** tools N-panel.
 Its **Model / Bake / Export** selector reuses the expanded button-row layout:
 
-- **Model:** texture-set and Low/High collections, assignment buttons, Mesh Matching,
-  Validate Setup and Bake Issues.
-- **Bake:** resolution, Requested Bake Maps, Bake/Cancel, inline Bake Settings,
-  Bake Issues and Advanced / Troubleshooting connection/diagnostic actions.
-- **Export:** project name, output folder, Open Painter Project, New Project Next
-  Bake, custom export mapping, Update Textures (No Bake) and Retry Material Import.
+- **Bake** is the default and contains the complete workflow in its original order:
+  texture-set and Low/High collection setup, project name/output folder, resolution,
+  Requested Bake Maps, Mesh Matching, Bake/Cancel and inline Bake Settings,
+  Bake Status/Issues, Open Painter Project, then Advanced / Troubleshooting.
+  Advanced includes custom export mapping, Update Textures (No Bake), New Project
+  Next Bake, connection/diagnostic actions and Retry Material Import.
+- **Model** and **Export** are currently empty placeholders for future tools.
 
-Bake Status is shared across all three tabs. Cancel remains available on every
-tab while a job is running. Narrow sidebars stack collection fields, map choices and paired actions;
+Bake Status and Cancel are available in Bake while a job is running.
+Narrow sidebars stack collection fields, map choices and paired actions;
 wider sidebars show two map columns. Low/High assignment buttons, collection
 visibility controls, issue search/filtering, Select All, Revalidate and applicable
 UV-face selection remain available. This is a presentation change only: existing

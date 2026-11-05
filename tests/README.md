@@ -52,8 +52,9 @@ unchanged defaults and side-effect-free drawing in disposable background Blender
 `test_baking_workspace.py` checks separate Tools/Baking N-panels, feature lifecycle,
 sidebar-manager discovery, preserved section buttons, collision-safe collection
 names, role colors, and visibility controls for hidden/excluded collections.
-`test_painter_ui_parity.py` checks feature access across Model/Bake/Export tabs,
-including cancellation on every tab while busy. Run in disposable background Blender.
+`test_painter_ui_parity.py` checks the complete workflow and original control order
+in Bake, empty Model/Export placeholders, and cancellation in Bake while busy.
+Run in disposable background Blender.
 
 `test_painter_skew_fixtures.py` requires disposable background Blender, not
 Painter. It checks eight-vertex topology, joined/separate high inputs, an actual

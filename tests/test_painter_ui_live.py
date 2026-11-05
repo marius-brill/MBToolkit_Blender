@@ -87,11 +87,11 @@ def check():
             runtime.cleanup()
             bpy.types.VIEW3D_HT_header.remove(draw)
             addon.unregister()
-            OUTPUT.write_text(f'PASS: separate Tools/Baking panels, Model/Bake/Export real-layout collapsed/expanded/busy states, icons, visibility, status; {draws} draws\n')
+            OUTPUT.write_text(f'PASS: separate Tools/Baking panels, Bake-only real-layout collapsed/expanded/busy states, icons, visibility, status; {draws} draws\n')
             bpy.ops.wm.quit_blender()
             return None
         # Change stored UI state in the timer, never inside a draw callback.
-        bpy.context.scene.mbt_painter.ui_tab = ('MODEL', 'BAKE', 'EXPORT')[stage % 3]
+        bpy.context.scene.mbt_painter.ui_tab = 'BAKE'
         for area in bpy.context.screen.areas:
             area.tag_redraw()
         stage += 1

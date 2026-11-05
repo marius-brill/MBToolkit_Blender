@@ -60,6 +60,7 @@ def main():
     try:
         bpy.ops.mbt.painter_texture_set(action='ADD')
         props = bpy.context.scene.mbt_painter
+        assert props.ui_tab == 'BAKE'
         assert props.bake_maps == {'NORMAL', 'AO', 'CURVATURE'}
         props.bake_maps = {key for key, _ in painter.settings.BAKE_MAPS}
         props.bake_settings = props.advanced = True
@@ -88,11 +89,22 @@ def main():
                         painter.draw(Layout(tab_records), context)
                         assert ('prop', 'ui_tab', True) in tab_records
                         if tab != 'BAKE':
-                            assert not any(r[0] == 'map' for r in tab_records)
-                        if busy:
+                            assert tab_records == [('prop', 'ui_tab', True)], tab_records
+                        if busy and tab == 'BAKE':
                             assert any(r[0] == 'operator' and r[1] == 'mbt.painter_cancel'
                                        and r[3] for r in tab_records), tab
                         records.extend(tab_records)
+                # Preserve the pre-split workflow in Bake, not merely across tabs.
+                order = [('prop', 'texture_collection'), ('prop', 'low_collection'),
+                         ('prop', 'high_collection'), ('prop', 'project_name'),
+                         ('prop', 'output_dir'), ('prop', 'resolution'),
+                         ('label', 'Requested Bake Maps'), ('label', 'Mesh Matching'),
+                         ('label', 'Bake'), ('prop', 'bake_settings'),
+                         ('label', 'Bake Settings'), ('label', 'Bake Status'),
+                         ('prop', 'advanced'), ('prop', 'export_config')]
+                positions = [next(i for i, record in enumerate(records)
+                                  if record[:2] == item) for item in order]
+                assert positions == sorted(positions), positions
                 maps = {record[1] for record in records if record[0] == 'map'}
                 assert maps == props.bake_maps
                 fields = {record[1] for record in records if record[0] == 'prop'}
@@ -107,6 +119,9 @@ def main():
                         for key, value in args.items()) for record in ops)
                 for action in ('AUTO', 'OPEN', 'EXPORT', 'TEST', 'CONNECT', 'CAPABILITIES'):
                     assert has('mbt.painter_connect', action=action), action
+                connection_order = [record[2].action for record in ops
+                                    if record[1] == 'mbt.painter_connect']
+                assert connection_order == ['AUTO', 'OPEN', 'EXPORT', 'TEST', 'CONNECT', 'CAPABILITIES']
                 for action in ('PROJECTION', 'VALIDATE', 'IMPORT'):
                     assert has('mbt.painter_action', action=action), action
                 for role in ('LOW', 'HIGH'):
@@ -133,7 +148,7 @@ def main():
         records = []
         issues.MBT_UL_painter_issues.draw_filter(SimpleNamespace(filter_name=''), bpy.context, Layout(records))
         assert ('prop', 'issue_blocking_only', True) in records
-        print('PASS: Model/Bake/Export tabs, narrow/wide, busy/idle, all controls/actions, filters, unchanged defaults and side-effect-free drawing')
+        print('PASS: Bake-only workflow in original order, empty Model/Export tabs, narrow/wide, busy/idle, all controls/actions, filters and side-effect-free drawing')
     finally:
         addon.unregister()
 

@@ -192,12 +192,16 @@ def draw_advanced(layout, context, props, busy):
     advanced = card(layout, 'Advanced / Troubleshooting', props=props, toggle='advanced')
     if advanced is not None:
         advanced.enabled = not busy
+        advanced.prop(props, 'export_config')
+        advanced.operator('mbt.painter_connect', text='Update Textures (No Bake)', icon='IMPORT').action = 'EXPORT'
+        advanced.operator('mbt.painter_new_project', text='New Project Next Bake', icon='FILE_NEW')
         advanced.label(text='Connection / Diagnostics', icon='TOOL_SETTINGS')
         row = action_rows(advanced, context)
         row.operator('mbt.painter_connect', text='Test Connection').action = 'TEST'
         row.operator('mbt.painter_connect', text='Launch / Connect').action = 'CONNECT'
         advanced.operator('mbt.painter_connect', text='Inspect Projection Capabilities').action = 'CAPABILITIES'
         advanced.operator('mbt.painter_action', text='Validate').action = 'VALIDATE'
+        advanced.operator('mbt.painter_action', text='Retry Material Import', icon='MATERIAL').action = 'IMPORT'
         if props.preparation_timings:
             import json
             from .issues import text_width, wrapped
@@ -208,53 +212,39 @@ def draw_advanced(layout, context, props, busy):
                 wrapped(diagnostics, '%.3fs — %s' % (item['seconds'], item['stage']), text_width(context))
 
 
-def draw_export(layout, context, props, busy):
-    from ...ui import section_icons
+def draw_output(layout, props):
     output = card(layout, 'Project / Output', 'FILE')
-    output.enabled = not busy
     output.prop(props, 'project_name')
     output.prop(props, 'output_dir')
-    project = output.row()
-    project.enabled = not busy and bool(props.project_file)
-    project.operator('mbt.painter_connect', text='Open Painter Project', **section_icons.icon_kwargs('painter_app')).action = 'OPEN'
-    output.operator('mbt.painter_new_project', text='New Project Next Bake', icon='FILE_NEW')
-    textures = card(layout, 'Textures / Materials', 'IMPORT')
-    textures.enabled = not busy
-    textures.prop(props, 'export_config')
-    textures.operator('mbt.painter_connect', text='Update Textures (No Bake)', icon='IMPORT').action = 'EXPORT'
-    textures.operator('mbt.painter_action', text='Retry Material Import', icon='MATERIAL').action = 'IMPORT'
 
 
 def draw(layout, context):
     from . import runtime
     from .issues import draw as draw_issues
+    from ...ui import section_icons
     props = context.scene.mbt_painter
     busy = runtime.busy()
     tabs = layout.row(align=True)
     tabs.scale_y = 1.25
     tabs.prop(props, 'ui_tab', expand=True)
+    if props.ui_tab != 'BAKE':
+        return
     layout.separator(factor=0.5)
     controls = layout.column()
     controls.enabled = not busy
-    if props.ui_tab == 'MODEL':
-        draw_setup(controls, context, props)
-        draw_matching(controls, context, props)
-        controls.operator('mbt.painter_action', text='Validate Setup', icon='CHECKMARK').action = 'VALIDATE'
-    elif props.ui_tab == 'BAKE':
-        controls.prop(props, 'resolution')
-        draw_maps(controls, context, props)
-        draw_actions(layout, context, props, busy)
-        options = layout.column()
-        options.enabled = not busy
-        draw_settings(options, context, props)
-    else:
-        draw_export(layout, context, props, busy)
-    if busy and props.ui_tab != 'BAKE':
-        cancel = layout.row()
-        cancel.enabled = runtime._cancel is not None and not runtime._cancel.is_set()
-        cancel.operator('mbt.painter_cancel', text='Cancel Bake', icon='X')
+    draw_setup(controls, context, props)
+    draw_output(controls, props)
+    controls.prop(props, 'resolution')
+    draw_maps(controls, context, props)
+    draw_matching(controls, context, props)
+    controls.operator('mbt.painter_action', text='Validate Setup', icon='CHECKMARK').action = 'VALIDATE'
+    draw_actions(layout, context, props, busy)
+    options = layout.column()
+    options.enabled = not busy
+    draw_settings(options, context, props)
     draw_status(layout, context, props, busy)
-    if props.ui_tab in {'MODEL', 'BAKE'}:
-        draw_issues(layout, context)
-    if props.ui_tab == 'BAKE':
-        draw_advanced(layout, context, props, busy)
+    draw_issues(layout, context)
+    project = layout.row()
+    project.enabled = not busy and bool(props.project_file)
+    project.operator('mbt.painter_connect', text='Open Painter Project', **section_icons.icon_kwargs('painter_app')).action = 'OPEN'
+    draw_advanced(layout, context, props, busy)

@@ -81,10 +81,10 @@ from .issues import MBT_PainterIssue, MBT_PainterIssueTarget
 
 class MBT_PainterSettings(bpy.types.PropertyGroup):
     ui_tab: EnumProperty(name='Baking Tab', items=(
-        ('MODEL', 'Model', 'Texture sets, model collections and mesh matching'),
-        ('BAKE', 'Bake', 'Requested maps, resolution, bake settings and diagnostics'),
-        ('EXPORT', 'Export', 'Project output, texture updates and material import')),
-        default='MODEL')
+        ('MODEL', 'Model', 'Reserved for future modeling tools'),
+        ('BAKE', 'Bake', 'Complete Painter setup, baking and texture workflow'),
+        ('EXPORT', 'Export', 'Reserved for future export tools')),
+        default='BAKE')
     issue_rows: CollectionProperty(type=MBT_PainterIssue)
     issue_index: IntProperty(default=0, min=0, options={'SKIP_SAVE'})
     issue_blocking_only: BoolProperty(default=False, options={'SKIP_SAVE'})

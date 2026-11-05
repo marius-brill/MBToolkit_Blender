@@ -78,7 +78,7 @@ def main():
         visibility.clear()
         sets.draw_visibility(VisibilityLayout(visibility), bpy.context, low)
         assert any(record[1] == 'exclude' for record in visibility if len(record) == 3)
-        settings.ui_tab = 'MODEL'
+        assert settings.ui_tab == 'BAKE'
         records = []
         panels.MBT_PT_baking.draw(SimpleNamespace(layout=Layout(records)), bpy.context)
         assert sum(kind == 'split' and kw.get('factor') == 0.72 for kind, kw in records) == 3
@@ -91,7 +91,7 @@ def main():
         prefs.enable_substance_painter = True
         addon.feature_manager.sync(prefs)
         assert panels.MBT_PT_baking.poll(bpy.context)
-        print('PASS: separate Tools/Baking panels, Model tab, lifecycle, numbered names, role colors, hidden/excluded collection controls')
+        print('PASS: separate Tools/Baking panels, Bake tab, lifecycle, numbered names, role colors, hidden/excluded collection controls')
     finally:
         addon.unregister()
         bpy.context.preferences.addons.remove(entry)

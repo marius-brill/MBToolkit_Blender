@@ -1,5 +1,9 @@
 # Changelog
 
+- Consolidate the complete Painter workflow in the Baking panel's default Bake
+  tab, restoring the original setup/output/maps/matching/bake/status/advanced order.
+  Keep Model and Export empty for future tools; retain collection and responsive UI.
+
 - Move baking to its own MBT Baking sidebar category, separate from MBToolkit
   tools. Replace the Tools/Baking switch with Model/Bake/Export tabs in the baking
   panel, preserving all existing controls and keeping status/cancellation shared.
