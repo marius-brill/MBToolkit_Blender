@@ -47,6 +47,9 @@ class Layout:
     def __init__(self, records): self.records = records
     def row(self, **kwargs): return Layout(self.records)
     def column(self, **kwargs): return Layout(self.records)
+    def split(self, **kwargs):
+        self.records.append(('split', kwargs))
+        return Layout(self.records)
     def __setattr__(self, name, value):
         object.__setattr__(self, name, value)
         if name != 'records':
@@ -57,6 +60,11 @@ class Layout:
     def separator(self, **kwargs): pass
     def label(self, **kwargs): self.records.append(('label', kwargs))
     def prop(self, obj, name, **kwargs): assert hasattr(obj, name), name
+    def prop_enum(self, obj, name, value, **kwargs):
+        assert value in obj.bl_rna.properties[name].enum_items.keys(), value
+    def menu(self, name, **kwargs):
+        assert hasattr(bpy.types, name), name
+        self.records.append(('menu', kwargs))
     def operator(self, name, **kwargs):
         self.records.append((name, kwargs))
         category, action = name.split('.')

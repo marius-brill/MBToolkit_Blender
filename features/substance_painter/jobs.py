@@ -30,6 +30,14 @@ def safe_name(name):
     return re.sub(r'[^A-Za-z0-9_-]+', '_', name).strip('_')[:64] or 'Asset'
 
 
+def singular_transform(matrix):
+    """Scale-independent test; small but well-conditioned assets are valid."""
+    basis = matrix.to_3x3()
+    lengths = [column.length for column in basis.col]
+    product = math.prod(lengths)
+    return not math.isfinite(product) or product == 0 or abs(basis.determinant()) / product < 1e-12
+
+
 def meshes(collection):
     return sorted((obj for obj in collection.all_objects if obj.type == 'MESH'),
                   key=lambda obj: obj.name) if collection else []
@@ -84,7 +92,7 @@ def validate_steps(context, ignore_warnings=False):
             issue(obj, 'linked data is not supported; make it local first')
         if not obj.data.polygons:
             issue(obj, 'mesh has no faces')
-        if abs(obj.matrix_world.determinant()) < 1e-12:
+        if singular_transform(obj.matrix_world):
             issue(obj, 'transform has zero scale')
         if obj in low:
             try:
@@ -253,6 +261,7 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
         if previous['normal_format'] != settings.normal_format:
             raise PainterError('Normal format changed; use New Project in Advanced to apply it safely')
     names, pairs = None, {}
+    matching_issues = []
     custom = None
     from ...core.addon import get_prefs
     prefs = get_prefs(context)
@@ -283,19 +292,16 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
     if automatic:
         from .matching import resolve_steps
         names, pairs = {}, {}
-        matching_issues = []
         for index, entry in enumerate(groups):
-            try:
-                scoped_names, scoped_pairs = yield from resolve_steps(context, meshes(entry.low_collection), meshes(entry.high_collection))
-            except ValidationIssues as error:
-                matching_issues.extend(error.issues)
-                continue
+            scoped_names, scoped_pairs = yield from resolve_steps(
+                context, meshes(entry.low_collection), meshes(entry.high_collection), warnings=matching_issues)
             if len(groups) > 1:
                 scoped_names = {obj: f'MBTSet_{index:03d}_' + name for obj, name in scoped_names.items()}
             names.update(scoped_names)
             pairs.update(scoped_pairs)
-        if matching_issues:
-            raise ValidationIssues(matching_issues)
+        from .issues import publish
+        publish(context, matching_issues)
+        settings.matching_report = '\n'.join(f"{issue['object']}: {issue['reason']}" for issue in matching_issues)
         from .materials import owned
         if not settings.replace_materials:
             protected = [obj.name for obj in low if any(slot.material and not owned(slot.material, obj)
@@ -342,6 +348,8 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
         raise PainterError('Final bake mesh names collide after project-name reuse; use New Project in Advanced')
     if previous and len(set(material_names)) != len(groups):
         raise PainterError('Associated texture-set names collide; use New Project in Advanced')
+    from .distances import estimate_steps, apply_results
+    estimated = yield from estimate_steps(context, groups, pairs)
     output = Path(bpy.path.abspath(settings.output_dir)).resolve()
     output.mkdir(parents=True, exist_ok=True)
     directory = Path(tempfile.mkdtemp(prefix=safe_name(settings.project_name) + '_', dir=output))
@@ -352,6 +360,7 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
         (directory / 'textures').mkdir()
         job = {
             'schema_version': SCHEMA_VERSION, 'job_id': str(uuid.uuid4()),
+            'matching_issues': matching_issues,
             'project_name': settings.project_name, 'blend_file': bpy.data.filepath,
             'status': 'prepared', 'low_mesh': str(directory / 'low.fbx'),
             'high_mesh': str(directory / 'high.fbx'),
@@ -361,12 +370,13 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
             'normal_format': settings.normal_format, 'export_preset': settings.export_preset,
             'match_method': 'BY_NAME' if automatic else 'ALWAYS', 'apply_modifiers': True,
             'mesh_names': {obj.name: name for obj, name in (names or {}).items()},
-            'baking': bake_settings(settings),
+            'baking': dict(bake_settings(settings), **estimated.get(
+                groups[settings.active_texture_set].as_pointer(), {})),
             'set_definitions': [
                 {'set_id': getattr(entry, 'set_id', 'default'),
                  'texture_set': material_names[low.index(meshes(entry.low_collection)[0])],
                  'resolution': int(entry.resolution), 'bake_maps': sorted(entry.bake_maps),
-                 'baking': bake_settings(entry)} for entry in groups],
+                 'baking': dict(bake_settings(entry), **estimated.get(entry.as_pointer(), {}))} for entry in groups],
             'texture_sets': [
                 {'object': obj.name, 'object_id': obj['mbt_painter_id'],
                  'set_id': getattr(owners[obj], 'set_id', 'default'),
@@ -381,11 +391,15 @@ def prepare_steps(context, automatic=False, ignore_warnings=False):
         shutil.rmtree(directory, ignore_errors=True)
         raise
     settings.last_job = str(path)
+    apply_results(settings, groups, estimated)
+    settings.matching_report = '\n'.join(f"{issue['object']}: {issue['reason']}" for issue in matching_issues)
     if automatic:
         settings.project_file = job['project_file']
         for obj, target in pairs.items():
-            if not isinstance(target, tuple):
-                obj.mbt_bake_target = target
+            if not isinstance(target, tuple) and not any(issue['object'] == obj.name for issue in matching_issues):
+                if obj.mbt_bake_target is None or obj.mbt_bake_target == obj.mbt_bake_auto_target:
+                    obj.mbt_bake_target = target
+                    obj.mbt_bake_auto_target = target
     return f'Prepared {len(low)} low / {len(high)} high meshes. Painter has not been run.'
 
 
@@ -486,7 +500,8 @@ def record_export(path, result):
 def bake_settings(settings):
     return {'front_distance': settings.front_distance, 'rear_distance': settings.rear_distance,
             'relative_distance': settings.relative_distance, 'antialiasing': settings.antialiasing,
-            'id_source': settings.id_source}
+            'id_source': settings.id_source,
+            'projection_normals': getattr(settings, 'projection_normals', 'AVERAGED')}
 
 
 def update_bake_settings(path, settings):
@@ -504,8 +519,16 @@ def update_bake_settings(path, settings):
             entry = by_id[definition['set_id']]
             if not entry.bake_maps:
                 raise PainterError('Select at least one bake map for every texture set')
+            options = bake_settings(entry)
+            if getattr(entry, 'auto_distances', False):
+                # Rebake uses the already exported geometry, not potentially edited live meshes.
+                previous = definition['baking']
+                if 'distance_estimate' not in previous:
+                    raise PainterError('Prepare a new bake to calculate automatic cage distances')
+                options.update({key: previous[key] for key in
+                                ('front_distance', 'rear_distance', 'relative_distance', 'distance_estimate')})
             definition.update(resolution=int(entry.resolution), bake_maps=sorted(entry.bake_maps),
-                              baking=bake_settings(entry))
+                              baking=options)
     destination = Path(bpy.path.abspath(path))
     temporary = destination.with_suffix('.json.tmp')
     try:

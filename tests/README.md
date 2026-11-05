@@ -12,6 +12,21 @@ session. Tests may delete objects, change preferences, save files, or quit Blend
 
 ## Quick checks (ordinary Python)
 
+`test_skew_metrics.py` checks decoded-image hashing, missing-detail failures,
+centroid/shape separation and region-limited normal-detail thresholds without
+Blender or Painter. Run it individually like the other ordinary-Python scripts.
+
+The live `test_painter_skew_live.py` also accepts `--cage-probe --edge-fixture`
+after `-- --live`. These enable a test-only custom-cage adapter and a beveled-panel
+edge witness. The adapter never modifies production bake helpers on disk; remote
+helpers are restored after each bake. It records full common/baker property keys
+and public baking/resource docstrings in `backend_discovery.json`. Both cages and
+both projection modes are checked through save/reopen. Inspect `result.json` for
+detail recall, shape overlap, centroid error and edge-reference measurements.
+These are thresholded normal-detail metrics, not full high-surface coverage.
+The current edge witness does not distinguish projection modes. The test restores
+distance-based/averaged settings but leaves experimental baked maps in its project.
+
 From PowerShell, using absolute paths (adjust these for your checkout):
 
 ```powershell
@@ -30,6 +45,45 @@ Blender; it does not run integration or GUI tests.
 
 ## Background Blender checks
 
+`test_painter_ui_parity.py` checks baking UI properties and operator actions,
+all seven map choices, narrow/wide layouts, busy-state gating, issue filters,
+unchanged defaults and side-effect-free drawing in disposable background Blender.
+
+`test_baking_workspace.py` checks separate Tools/Baking N-panels, feature lifecycle,
+sidebar-manager discovery, preserved section buttons, collision-safe collection
+names, role colors, and visibility controls for hidden/excluded collections.
+`test_painter_ui_parity.py` checks feature access across Model/Bake/Export tabs,
+including cancellation on every tab while busy. Run in disposable background Blender.
+
+`test_painter_skew_fixtures.py` requires disposable background Blender, not
+Painter. It checks eight-vertex topology, joined/separate high inputs, an actual
+corner gap missed by both adjacent perpendicular ray families, a nonempty angled
+ray witness, source preservation and the lack of local sparse-cage controls.
+Run with the same `--background --factory-startup --python-exit-code 1 --python`
+arguments as the other background scripts.
+
+The live coverage harness also accepts `--sparse [--edge-gap]`; `--edge-gap`
+requires `--sparse`. The gap run passes only if averaged projection covers a
+nonempty blue witness while mesh-normal projection loses over 90% of it.
+Neither sparse run applies correction or claims automatic readiness. Refusal
+to replace an unrelated open project is intentional; do not bypass the guard.
+
+`test_painter_planar.py` checks read-only planar grouping, geometric boundaries,
+triangulation diagonals, transforms/scales, gentle bends, invalid/nonfinite and
+nonmanifold rejection. It does not contact Painter.
+
+`test_painter_skew_coverage_live.py` requires disposable background Blender with
+`-- --live`; optional `--joined` joins evaluated high inputs before export.
+It refuses open projects unless `--replace-test <absolute-spp>` names the exact
+retained skew fixture. It retains material-ID maps including flat caps, a dense
+synthetic low, expanded/vertical/local cages, discovery and result JSON. Its local
+field uses known fixture positions; it never remeshes artist assets. PASS requires
+interior ID placement/overlap/recall and a nonempty preserved boundary witness.
+`automatic_correction_ready` stays false: boundary-ray preservation is not correct
+hard-edge coverage. Inspect `result.json`, including limitations, not just the exit
+code. The disposable project is left open with distance-based/averaged settings
+restored, while its baked maps remain experimental.
+
 ```powershell
 $blender = 'C:\Program Files\Blender Foundation\Blender 5.2\blender.exe'
 & $blender --background --factory-startup --python-exit-code 1 --python "$root\tests\test_registration.py"
@@ -41,6 +95,7 @@ Use the same invocation with one of these scripts:
 | --- | --- |
 | `verify_structure.py` | Syntax and add-on module/import assumptions |
 | `test_registration.py` | Registration, Modifier List and Resample regressions |
+| `test_script_runner.py` | Script favorites CRUD, selection safety, execution, validation and feature lifecycle |
 | `test_feature_preferences.py` | Optional-feature preferences and lifecycle |
 | `test_modifier_timings.py` | Modifier evaluation timing behavior |
 | `test_modifier_catalog.py` | Native modifier catalogs with appended/prepended third-party menu callbacks |
@@ -48,13 +103,18 @@ Use the same invocation with one of these scripts:
 | `test_preferences.py` | Preference data, command pickers, shortcuts and drawing |
 | `test_scene_performance.py` | Scene scanning, selection, cancellation and lifecycle |
 | `test_sidebar_sections.py` | Selection logic and sidebar integration |
+| `test_vertex_color.py` | Storage/domain matrix, selection, channel math, rollback, batch/shared meshes, attributes and preview data |
 | `test_substance_painter.py` | Painter jobs, validation and material integration |
 | `test_painter_bridge.py` | Transport and controlled Painter API behavior |
 | `test_painter_baking.py` | Bake configuration, cancellation, errors and save gating |
+| `test_painter_distances.py` | Automatic signed front/rear estimates, scene units, evaluated transforms/modifiers, set scoping, manual override and exported-geometry rebake consistency |
+| `test_painter_projection.py` | Pixel-space estimates, plane/box fixtures, transformed geometry, curvature/UV skips, state restoration and read-only capability gating |
 | `test_painter_workflow.py` | Grouping, matching, project reuse and workflow regressions |
 | `test_painter_texture_sets.py` | Shared default set, parent/child collections, per-set controls, real FBX material sharing, shared image import, rebake, persistence and legacy protection |
 | `test_painter_inputs.py` | Aggregated issues, popup actions, offset UV preservation, hidden/excluded collection restoration, many-to-many bake groups |
-| `test_painter_matching_diagnostics.py` | Group-union surface matching, true ambiguity aggregation, distant rejection, spatial samples, scoped validation and evaluated UV diagnostics |
+| `test_painter_issues.py` | Individual/candidate/all selection, hidden mesh reveal, rename/delete/save/load identities, filters, safe UV face navigation, trailing roles, tiny/mirrored transforms, auto/manual provenance and inactive-set guards |
+| `test_painter_matching_diagnostics.py` | Group-union surface matching, strict diagnostics, best-effort bake assignments/report persistence, invalid overrides, spatial samples, scoped validation and evaluated UV diagnostics |
+| `test_painter_status.py` | Fixed-row long/short status, independent elapsed clock, throttled text, preparation handoff, cancellation and details operator |
 | `test_painter_guard.py` | Controlled Painter window guard/watchdog and safe project opening; optional `-- --live-ui` launches/connects Painter and briefly hides/disables/restores its window without changing projects |
 | `test_painter_inputs_live.py` | Opt-in background `-- --live`: real two-low/one-high bake, offset islands, hidden collection and window protection; refuses existing projects, retains test files, closes only its exact test project |
 | `test_painter_runtime.py` | AUTO worker/main-thread handoff, cancellation, failure gates, scene/job changes, teardown/restart and real file reload |
@@ -69,7 +129,84 @@ open. See SUBSTANCE_PAINTER.md in the project root before using live mode.
 
 ## Interactive Blender checks
 
+### Painter remote access preflight
+
+Official reference:
+<https://experienceleague.adobe.com/en/docs/substance-3d-painter/using/scripting-and-development/scripts-and-plugins/remote-control-with-scripting>
+
+Painter must be started with `--enable-remote-scripting` and finish startup. The
+protocol is HTTP POST `/run.json`, port `60041`, JSON containing a Base64 UTF-8
+`python` expression; Python results must be explicitly serialized. Our bridge
+handles the returned JSON/string layers and probes both IPv4 and IPv6 localhost.
+
+For future agent sessions, run this **connect-only, read-only** preflight first:
+
+```powershell
+$root = 'C:\Users\mariu\AppData\Roaming\Blender Foundation\Blender\5.2\scripts\addons\MBToolkit'
+$python = 'C:\Program Files\Blender Foundation\Blender 5.2\5.2\python\bin\python.exe'
+& $python "$root\tests\probe_painter_remote.py"
+if ($LASTEXITCODE -ne 0) { throw 'Painter preflight failed; inspect the report before live tests' }
+Get-Content (Join-Path $env:TEMP 'mbt_painter_remote_probe.json')
+```
+
+No Blender process or third-party library is required. The script dynamically loads
+the existing bridge without importing `bpy`, tries `127.0.0.1` then `::1`, verifies
+Python, and runs helper discovery in an isolated namespace. It does not replace
+helpers/state in Painter globals, launch/close Painter, open/save/reload a project,
+set bake properties or bake. `--port` and `--output` can override defaults. A failed
+probe writes a failure report and exits nonzero. A successful transport with no
+ready project reports projection `NOT_READY`, not verified correction support.
+
+Verified November 4, 2026: only `::1:60041` responded; the process command line
+included `--enable-remote-scripting`. Painter executable version was `11.0.3`,
+whereas Python API `substance_painter.__version__` was `0.3.4` (not the application
+version). Read-only discovery on the already-open project exposed `SmoothNormals`,
+`CageMesh`, distance/automatic/custom cage modes and no skew-named common/detail
+property. This does not prove that every possible API lacks skew support.
+
+If unavailable, inspect the running process command line and test **both** address
+families. An existing process without the launch flag cannot be fixed by changing
+the HTTP request: have the user save/close it before restarting. Only launch
+Painter yourself when no existing instance/project can be disturbed; use
+`bridge.launch()` (it strips inherited Blender `OCIO`) or the documented executable
+flag. Do not change firewall rules or expose the listener outside localhost.
+An open project is fine for this probe but not for destructive live suites: never
+close an unrelated project or bypass their disposable-project guards.
+
+Controlled probe tests: run `test_painter_remote_probe.py` with ordinary Python.
+
+#### Agent-managed startup (no user launch needed)
+
+Use the same script with `--launch` to connect to an existing remote-enabled
+instance or automatically start Painter when none is running:
+
+```powershell
+& $python "$root\tests\probe_painter_remote.py" --launch
+```
+
+This reuses `bridge.launch()` with `--enable-remote-scripting`, removes inherited
+`OCIO`, auto-detects the executable and waits up to 90 seconds for IPv4/IPv6 access.
+Override with `--executable <absolute-exe-path>` or `--startup-timeout <seconds>`.
+Windows process discovery prevents a second launch if any Painter-named process
+is running but unreachable; failed process discovery also prevents launch. It
+never kills/restarts a session. Custom ports remain connect-only. The report's
+`launched` flag records whether this invocation started Painter. Startup dialogs
+can still require user interaction; on timeout the application is left running.
+Agents should use this command themselves for future tests instead of asking the
+user to start Painter. If an existing non-remote session blocks access, preserve
+its unsaved work and ask the user to save/close it before retrying.
+
 ### Opt-in Painter live matrix
+
+`test_painter_skew_live.py` runs in a disposable background Blender process with
+`-- --live`. It requires a connected, idle Painter with no open project and
+retains `MBToolkit_Painter_Skew_*` artifacts. It bakes a panel/bolt fixture in
+averaged, perpendicular and averaged-repeat modes, checks footprint statistics,
+queries the actual mode, and verifies save/reopen persistence. It leaves its test
+project open. Inspect `result.json`, not only the exit code. A rerun may explicitly
+pass `--replace-test <absolute-spp-path>` after `--live`; it saves/closes only that
+exact existing path beneath a retained skew-test directory, never an unrelated
+project. This is not a general correction/coverage certification.
 
 `test_painter_live_workflow.py` requires `-- --live` in a disposable GUI Blender
 process. It launches/connects Painter, refuses any pre-existing open project,
@@ -102,10 +239,16 @@ the interactive group:
 | `test_modifier_catalog_extension.py` | Standard extension ZIP install and real-layout modifier-preferences drawing with wrapped menus; requires isolated configuration (below) |
 | `test_n_panel_live.py` | Sidebar tab manager UI |
 | `test_preferences_live.py` | Shortcut capture, tiles, drag reorder and rollback |
+| `test_script_runner.py -- gui` | Native favorites menu, management list and sidebar drawing; result in system temp `mbt_script_runner_ui_result.txt` |
 | `test_scene_initialization_live.py` | Scene initialization in an interactive process |
 | `test_scene_performance_live.py` | Scheduled collection, real selection and editor isolation |
 | `test_sidebar_sections_live.py` | Sidebar section UI drawing |
+| `test_vertex_color_live.py` | Native color UI, GPU channel previews, transaction cancel, mixed accept and undo/redo; results in system temp `mbt_vertex_color_live_result.txt` |
 | `test_painter_ui_live.py` | Painter real-layout collapsed/expanded/busy drawing, action icons and status; result in system temp `mbt_painter_ui_result.txt` |
+
+For `test_vertex_color_live.py`, also pass `--enable-event-simulate` to dismiss the
+startup splash in the disposable process. It validates native picker layout and
+the live transaction callbacks, not OS-driven dragging/acceptance of the modal dialog.
 
 Several GUI scripts write result files (some under `C:\tmp`); inspect their output
 paths and create that directory if needed. Review both logs and result files:
@@ -145,6 +288,16 @@ try {
 ```
 
 ## Choosing what to run
+
+Script favorites persistence uses `test_script_runner.py -- write` followed by
+`test_script_runner.py -- read` in two background Blender processes. Set
+`BLENDER_USER_CONFIG` to a fresh disposable directory whose name contains
+`mbt_script_test_config`; create that exact directory before launching Blender
+(a nonexistent path can fall back to the real configuration). The test also
+checks Blender's resolved configuration path before saving. Use
+`--factory-startup` only for the write process.
+Restore the environment variable afterward. Never run persistence checks against
+your normal configuration.
 
 Run quick checks first, then the background checks for changed features plus
 registration. Run the corresponding GUI checks for UI changes, and the two-process

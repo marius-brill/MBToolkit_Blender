@@ -67,6 +67,75 @@ def main():
         assert 'bounds too far apart' in str(error)
     else:
         raise AssertionError('Distant surfaces must not match')
+    # Bake uses best-effort assignments while explicit diagnostics stay strict.
+    warnings = []
+    names, pairs = matching.resolve(ctx, [a, b], [high, second], warnings=warnings)
+    assert set(names) == {a, b, high, second} and set(pairs) == {high, second}
+    assert warnings and all(not issue['blocking'] for issue in warnings)
+    assert any('Best-effort assignment' in issue['reason'] for issue in warnings)
+    assert any('No high mesh matched' in issue['reason'] for issue in warnings)
+    with TemporaryDirectory() as folder:
+        settings = ctx.scene.mbt_painter
+        settings.output_dir = folder
+        jobs.prepare(ctx, automatic=True)
+        job = jobs.read_job(settings.last_job)
+        assert job['matching_issues'] and settings.matching_report
+        assert all(obj.name in job['mesh_names'] for obj in (a, b, high, second))
+        assert high.mbt_bake_target is None and second.mbt_bake_target is None
+        assert Path(job['low_mesh']).is_file() and Path(job['high_mesh']).is_file()
+        # Best-effort assignments must remain usable on a subsequent preparation.
+        jobs.prepare(ctx, automatic=True)
+        assert jobs.read_job(settings.last_job)['matching_issues']
+        bpy.ops.mbt.painter_new_project()
+        assert not settings.matching_report
+    high.mbt_bake_group = 'MissingGroup'
+    high.mbt_bake_target = second
+    warnings = []
+    _, pairs = matching.resolve(ctx, [a], [high], warnings=warnings)
+    assert pairs[high] == a
+    assert any('Bake Group has no low' in issue['reason'] for issue in warnings)
+    assert any('Bake Target is not in' in issue['reason'] for issue in warnings)
+    high.mbt_bake_group = ''
+    high.mbt_bake_target = None
+    # A tenfold winner and the reported 0.002/0.01223 pair are not ambiguous.
+    assert not matching.ambiguous_scores(0.0007579, 0.008244)
+    assert not matching.ambiguous_scores(0.002, 0.01223)
+    assert matching.ambiguous_scores(0, 0)
+    assert matching.ambiguous_scores(0.01, 0.011)
+    # Minority raised details must not impose a 90% vertex-coverage gate.
+    assert matching.distance_score([0.001] * 82 + [0.3] * 18, 0.1, 1) is not None
+    assert matching.distance_score([0.3] * 82 + [0.001] * 18, 0.1, 1) is None
+    # Equal-sized parallel surfaces have different distances. The old ambiguity
+    # floor rejected this clear best candidate even though it was five times closer.
+    a.mbt_bake_group = 'A'
+    b.mbt_bake_group = 'B'
+    b.location.x = 0.08
+    high.location.x = 0.01
+    second.data = a.data.copy()
+    second.location.x = 0.08
+    second.mbt_bake_target = b
+    ctx.view_layer.update()
+    _, pairs = matching.resolve(ctx, [a, b], [high, second])
+    assert pairs[high] == a and pairs[second] == b
+    # A densely tessellated, tiny remote detail must not dominate sampling.
+    detail_mesh = bpy.data.meshes.new('AreaSamples')
+    vertices = [(0, 0, 0), (10, 0, 0), (0, 10, 0)]
+    faces = [(0, 1, 2)]
+    for index in range(200):
+        offset = len(vertices)
+        vertices.extend([(100, index * 0.0001, 0), (100.0001, index * 0.0001, 0),
+                         (100, index * 0.0001 + 0.0001, 0)])
+        faces.append((offset, offset + 1, offset + 2))
+    detail_mesh.from_pydata(vertices, [], faces)
+    assert all(point.x < 11 for point in matching.surface_samples(detail_mesh, a.matrix_world))
+    # Actual surface matching accepts a cube with one raised face (4/8 vertices
+    # beyond the old tolerance), rather than diagnosing a bakeability failure.
+    raised = cube('RaisedDetail', 'HIGH')
+    for vertex in raised.data.vertices:
+        if vertex.co.z > 0:
+            vertex.co.z += 0.5
+    ctx.view_layer.update()
+    assert matching.resolve(ctx, [a], [raised])[1][raised] == a
     assert matching.stem('Part.007-low') == matching.stem('Part.007-high') == 'Part.007'
     # 255 vertices used to sample only the first 128; retain the remote endpoint.
     sample_mesh = bpy.data.meshes.new('SampleOrder')
@@ -124,7 +193,7 @@ def main():
         cube('SecondSculpt', 'HIGH')
         assert bpy.ops.mbt.painter_action(action='VALIDATE') == {'FINISHED'}
     addon.unregister()
-    print('PASS: group union, ambiguity aggregation, distance rejection, spatial sampling and UV diagnostics', flush=True)
+    print('PASS: group union, robust detail matching, clear winners, true ambiguity, distance rejection, area sampling and UV diagnostics', flush=True)
 
 
 if __name__ == '__main__':

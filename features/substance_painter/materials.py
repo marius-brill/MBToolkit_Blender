@@ -6,7 +6,9 @@ from .jobs import PainterError, read_job
 
 def owned(material, obj):
     return material is not None and (material.get('mbt_painter_object') == obj.name or
-        bool(obj.get('mbt_painter_id') and material.get('mbt_painter_object_id') == obj['mbt_painter_id']))
+        obj.name in material.get('mbt_painter_member_names', {}) or
+        bool(obj.get('mbt_painter_id') and (material.get('mbt_painter_object_id') == obj['mbt_painter_id'] or
+             obj['mbt_painter_id'] in material.get('mbt_painter_members', []))))
 
 
 def build_nodes(material, entry, images, normal_format):
@@ -91,31 +93,47 @@ def import_maps(context):
                                'Check filenames and the active job, or use Export from Painter / Import.')
         targets.append((obj, entry, files))
 
+    groups = {}
+    for obj, entry, files in targets:
+        key = entry.get('set_id') or entry['texture_set']
+        members = groups.setdefault(key, [])
+        if members and (members[0][1]['textures'] != entry['textures'] or
+                        members[0][1]['texture_set'] != entry['texture_set']):
+            raise PainterError('Inconsistent maps for texture set: ' + entry['texture_set'])
+        members.append((obj, entry, files))
+
     # Preload every image and stage every graph before changing any object's slots.
     staged, loaded = [], []
     shared_images = {}
     missing = []
     try:
-        for obj, entry, files in targets:
+        for key, members in groups.items():
+            obj, entry, files = members[0]
+            graph_entry = dict(entry)
+            if len({item[1]['uv_map'] for item in members}) > 1:
+                # An empty name uses each object's active-render UV for both sampling
+                # and tangent-space normals; no destructive UV renaming is needed.
+                graph_entry['uv_map'] = ''
             images = {}
             for channel, path in files.items():
                 # Dedicated datablocks avoid changing color spaces of unrelated image users.
-                key = (channel, path)
-                image = shared_images.get(key)
+                image_key = (channel, path)
+                image = shared_images.get(image_key)
                 if image is None:
                     image = bpy.data.images.load(str(path), check_existing=False)
                     loaded.append(image)
                     image.colorspace_settings.name = 'sRGB' if channel == 'base_color' else 'Non-Color'
-                    shared_images[key] = image
+                    shared_images[image_key] = image
                 images[channel] = image
             material = bpy.data.materials.new('MBT_' + entry['texture_set'])
-            staged.append((obj, entry, material, images))
-            material['mbt_painter_object'] = obj.name
-            if entry.get('object_id'):
-                material['mbt_painter_object_id'] = entry['object_id']
+            staged.append((members, graph_entry, material, images))
+            material['mbt_painter_set'] = key
+            material['mbt_painter_members'] = {item[1]['object_id']: True for item in members if item[1].get('object_id')}
+            material['mbt_painter_member_names'] = {item[0].name: True for item in members
+                                                    if not item[1].get('object_id')}
             material['mbt_painter_job'] = job['job_id']
-            build_nodes(material, entry, images, job['normal_format'])
-            missing.extend(f'{obj.name}/{key}' for key in entry['textures'] if key not in files)
+            build_nodes(material, graph_entry, images, job['normal_format'])
+            missing.extend(f"{entry['texture_set']}/{channel}" for channel in entry['textures'] if channel not in files)
     except Exception:
         for _, _, material, _ in staged:
             bpy.data.materials.remove(material)
@@ -123,28 +141,53 @@ def import_maps(context):
             bpy.data.images.remove(image)
         raise
 
-    for obj, entry, staged_material, images in staged:
-        existing = next((slot.material for slot in obj.material_slots if owned(slot.material, obj)), None)
+    old_materials, old_images = set(), set()
+    for members, entry, staged_material, images in staged:
+        member_objects = {item[0] for item in members}
+        candidates = {slot.material for obj in member_objects for slot in obj.material_slots
+                      if owned(slot.material, obj)}
+        old_materials.update(candidates)
+        for candidate in candidates:
+            if candidate.use_nodes:
+                old_images.update(node.image for node in candidate.node_tree.nodes
+                                  if node.type == 'TEX_IMAGE' and node.image)
+        def safe_to_reuse(candidate):
+            if candidate.library:
+                return False
+            users = {obj for obj in bpy.data.objects if any(slot.material == candidate for slot in obj.material_slots)}
+            meshes = {obj.data for obj in users if obj.type == 'MESH'}
+            return (users <= member_objects and
+                    candidate.users == len(meshes) and
+                    all(mesh.users == sum(obj.data == mesh for obj in users) for mesh in meshes))
+        existing = next((candidate for candidate in candidates if safe_to_reuse(candidate)), None)
         material = staged_material
-        if existing is not None and existing.users == 1 and obj.data.users == 1:
-            old_images = {node.image for node in existing.node_tree.nodes
-                          if node.type == 'TEX_IMAGE' and node.image} if existing.use_nodes else set()
+        if existing is not None:
             build_nodes(existing, entry, images, job['normal_format'])
-            existing['mbt_painter_job'] = job['job_id']
+            for key in list(existing.keys()):
+                if key.startswith('mbt_painter_'):
+                    del existing[key]
+            for key in staged_material.keys():
+                existing[key] = staged_material[key]
             bpy.data.materials.remove(staged_material)
             material = existing
-            for image in old_images:
-                if image.users == 0:
-                    bpy.data.images.remove(image)
-        # Isolate linked duplicates before altering mesh slots or face material indices.
-        if obj.data.users > 1:
-            obj.data = obj.data.copy()
-        obj.data.materials.clear()
-        obj.data.materials.append(material)
-        obj.material_slots[0].link = 'DATA'
-        for polygon in obj.data.polygons:
-            polygon.material_index = 0
-    message = f'Updated materials on {len(staged)} low-poly objects.'
+        for obj, member_entry, _ in members:
+            # Isolate linked duplicates before altering slots, face indices or UV selection.
+            if obj.data.users > 1:
+                obj.data = obj.data.copy()
+            if not entry['uv_map']:
+                obj.data.uv_layers[member_entry['uv_map']].active_render = True
+            obj.data.materials.clear()
+            obj.data.materials.append(material)
+            obj.material_slots[0].link = 'DATA'
+            for polygon in obj.data.polygons:
+                polygon.material_index = 0
+    for material in old_materials:
+        if material.users == 0:
+            bpy.data.materials.remove(material)
+    for image in old_images:
+        if image.users == 0:
+            bpy.data.images.remove(image)
+    message = f'Updated {len(staged)} texture-set materials on {len(targets)} low-poly objects.'
     if missing:
         message += ' Optional maps missing: ' + ', '.join(missing)
     return message

@@ -47,9 +47,9 @@ def check():
             for key, section in addon.panels.SECTION_BY_KEY.items():
                 assert addon.panels.MBT_OT_select_section.description(
                     bpy.context, type('Section', (), {'section': key})()) == section[1]
-            assert len(icons._previews) == 8
+            assert len(icons._previews) == len(addon.panels.SECTION_BY_KEY)
             assert len({icons.icon_kwargs(key)['icon_value']
-                        for key in addon.panels.SECTION_BY_KEY}) == 8
+                        for key in addon.panels.SECTION_BY_KEY}) == len(addon.panels.SECTION_BY_KEY)
             for preview in icons._previews.values():
                 assert tuple(preview.icon_size) == (32, 32)
                 assert any(preview.icon_pixels_float[3::4])

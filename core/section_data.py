@@ -12,6 +12,7 @@ SECTIONS = (
     ('geonodes', 'Low to High', 'GEOMETRY_NODES', (0.78, 0.94, 0.63),
      ('geonodes.dynabool', 'geonodes.crease_by_angle', 'geonodes.sdf_remesh')),
     ('uv_tools', 'UV', 'GROUP_UVS', (1.0, 0.93, 0.65), ('uv_tools',)),
+    ('vertex_color', 'Vertex Color', 'GROUP_VCOL', (0.96, 0.70, 0.93), ('vertex_color',)),
     ('substance_painter', 'Bake', 'RENDER_STILL', (1.0, 0.73, 0.72), ('substance_painter',)),
     ('scene_stats', 'Scene Performance', 'GRAPH', (0.67, 0.92, 0.95), ('scene_stats',)),
 )

@@ -20,6 +20,35 @@ def _mbt_probe():
     })
 
 
+def _mbt_projection_capabilities():
+    """Read-only discovery. A matching property name is not proof of writable skew maps."""
+    result = {'version': str(getattr(_mbt_sp, '__version__', 'unknown')),
+              'correction_verified': False, 'automatic_correction_ready': False, 'texture_sets': [],
+              'note': 'Discovery only; no properties changed and no correction applied.'}
+    if not _mbt_project.is_in_edition_state() or _mbt_project.is_busy():
+        result['state'] = 'NOT_READY'
+        return _mbt_json.dumps(result)
+    try:
+        import substance_painter.baking as baking
+        result['native_skew_candidates'] = [name for name in dir(baking)
+                                            if 'skew' in name.lower() and not name.startswith('_')]
+        result['common_parameter_isolation_available'] = callable(
+            getattr(baking, 'unlink_all_common_parameters', None))
+        for ts in _mbt_textureset.all_texture_sets():
+            properties = {}
+            for key, prop in baking.BakingParameters.from_texture_set(ts).common().items():
+                if any(token in key.lower() for token in ('skew', 'cage', 'normal', 'height', 'depth')):
+                    properties[key] = {'value': str(prop.value()), 'enums': prop.enum_values()}
+            modes = properties.get('CageMode', {}).get('enums', {})
+            result['texture_sets'].append({'name': ts.name(), 'properties': properties,
+                'custom_cage_available': 'CageMesh' in properties and 'Custom file' in modes,
+                'native_skew_properties': [name for name in properties if 'skew' in name.lower()]})
+        result['state'] = 'DISCOVERED'
+    except Exception as error:
+        result.update(state='UNAVAILABLE', discovery_error=str(error))
+    return _mbt_json.dumps(result)
+
+
 def _mbt_set_options(job):
     return {entry['texture_set']: entry for entry in job.get('set_definitions', [])}
 
@@ -322,6 +351,19 @@ def _mbt_bake(job_path):
         if sorted(ts.name() for ts in texture_sets) != sorted({e['texture_set'] for e in job['texture_sets']}):
             raise RuntimeError('Painter texture sets do not match job')
         set_options = _mbt_set_options(job)
+        # Linked common properties can alias across texture sets. Unlink BEFORE
+        # obtaining Property handles or setting resolution, otherwise the last
+        # set's projection/distances may overwrite the others. Legacy/single-set
+        # jobs keep their existing linking behavior.
+        if len(texture_sets) > 1 and set_options:
+            definitions = [set_options.get(ts.name(), job) for ts in texture_sets]
+            common_options = [dict(definition['baking'], resolution=definition['resolution'])
+                              for definition in definitions]
+            if any(options != common_options[0] for options in common_options[1:]):
+                unlink = getattr(baking, 'unlink_all_common_parameters', None)
+                if not callable(unlink):
+                    raise RuntimeError('Painter cannot isolate per-set bake parameters; no bake started')
+                unlink()
         _mbt_set_resolutions(job)
         changes = {}
         plans = []
@@ -339,6 +381,11 @@ def _mbt_bake(job_path):
                       'MaxHeight': options['front_distance'],
                       'MaxDepth': options['rear_distance'],
                       'RelativeScale': options['relative_distance']}
+            # Old manifests retain their historical project-controlled behavior.
+            if 'projection_normals' in options:
+                if options['projection_normals'] not in {'AVERAGED', 'FACE'}:
+                    raise RuntimeError('Invalid projection normal mode')
+                values['SmoothNormals'] = options['projection_normals'] == 'AVERAGED'
             if job.get('match_method') == 'BY_NAME':
                 values.update(LowpolySuffix='_low', HipolySuffix='_high')
             for key, value in values.items():

@@ -9,11 +9,31 @@ from ...core.addon import get_prefs
 
 
 def show_issues(context, error, action, connect=False):
+    from .issues import publish
+    publish(context, error.issues)
     if bpy.app.background:
         return False
     bpy.ops.mbt.painter_issues('INVOKE_DEFAULT', issues=json.dumps(error.issues),
                              action=action, connect=connect)
     return True
+
+
+class MBT_OT_painter_status_details(bpy.types.Operator):
+    bl_idname = 'mbt.painter_status_details'
+    bl_label = 'Bake Status Details'
+    bl_description = 'Show the full status message without truncation'
+    report_text: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=620)
+
+    def draw(self, context):
+        import textwrap
+        for line in textwrap.wrap(self.report_text, width=85):
+            self.layout.label(text=line)
+
+    def execute(self, context):
+        return {'FINISHED'}
 
 
 class MBT_OT_painter_issues(bpy.types.Operator):
@@ -26,16 +46,14 @@ class MBT_OT_painter_issues(bpy.types.Operator):
                                 ('IGNORE', 'Ignore & Continue', 'Continue with quality warnings acknowledged for this job')))
 
     def invoke(self, context, event):
+        from .issues import publish
+        publish(context, json.loads(self.issues))
         return context.window_manager.invoke_props_dialog(self, width=620)
 
     def draw(self, context):
-        import textwrap
+        from .issues import draw
         entries = json.loads(self.issues)
-        for entry in entries:
-            box = self.layout.box()
-            box.label(text=entry['object'], icon='ERROR' if entry['blocking'] else 'INFO')
-            for line in textwrap.wrap(entry['reason'], 85):
-                box.label(text=line)
+        draw(self.layout, context)
         if any(entry['blocking'] for entry in entries):
             self.layout.label(text='Blocking issues must be fixed before continuing.', icon='ERROR')
         self.layout.prop(self, 'choice', expand=True)
@@ -43,16 +61,9 @@ class MBT_OT_painter_issues(bpy.types.Operator):
     def execute(self, context):
         entries = json.loads(self.issues)
         if self.choice == 'SELECT':
-            from .evaluation import available
-            objects = [bpy.data.objects.get(entry['object']) for entry in entries]
-            objects = list(dict.fromkeys(obj for obj in objects if obj is not None))
-            with available(context, objects, restore=False):
-                for obj in context.view_layer.objects:
-                    obj.select_set(False)
-                for obj in objects:
-                    obj.select_set(True)
-                if objects:
-                    context.view_layer.objects.active = objects[0]
+            from .issues import publish, select
+            publish(context, entries)
+            select(context, [row.mesh for row in context.scene.mbt_painter.issue_rows])
             return {'FINISHED'}
         if any(entry['blocking'] for entry in entries):
             self.report({'WARNING'}, 'Fix blocking issues first; no meshes were skipped')
@@ -124,7 +135,7 @@ class MBT_OT_painter_assign(bpy.types.Operator):
             entry = ensure_default(context)
             collection = getattr(settings, attribute)
             if collection is None:
-                collection = bpy.data.collections.new(entry.collection.name + '_' + self.role.title())
+                collection = bpy.data.collections.new(entry.collection.name + '_' + self.role.lower())
                 entry.collection.children.link(collection)
                 setattr(settings, attribute, collection)
         elif not settings.texture_sets:
@@ -144,7 +155,8 @@ class MBT_OT_painter_action(bpy.types.Operator):
     bl_label = 'Painter Workflow'
     bl_description = 'Validate, prepare FBX and JSON files, or import manually exported textures; does not run Painter'
     action: EnumProperty(items=(('VALIDATE', 'Validate Setup', ''),
-        ('PREPARE', 'Prepare Bake Job', ''), ('IMPORT', 'Import Maps / Update Material', '')))
+        ('PREPARE', 'Prepare Bake Job', ''), ('IMPORT', 'Import Maps / Update Material', ''),
+        ('PROJECTION', 'Analyze Projection', 'Estimate skew risk without changing meshes or baking')))
     ignore_warnings: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     @classmethod
@@ -153,10 +165,23 @@ class MBT_OT_painter_action(bpy.types.Operator):
 
     def execute(self, context):
         try:
-            if self.action == 'VALIDATE':
+            if self.action == 'PROJECTION':
+                from .projection import analyze
+                from .issues import publish
+                settings = context.scene.mbt_painter
+                result = analyze(context, threshold=settings.projection_threshold)
+                settings.projection_report = json.dumps(result)
+                publish(context, result['issues'])
+                message = (f"Projection estimate: {len(result['issues'])} issues; "
+                           f"{result['checked_samples']} checked / {result['skipped_samples']} skipped samples. "
+                           'No correction applied; bounded samples can miss detail.')
+            elif self.action == 'VALIDATE':
                 low, high = jobs.validate(context, ignore_warnings=self.ignore_warnings)
                 from .matching import resolve_sets
                 resolve_sets(context)
+                from .issues import publish
+                publish(context, [])
+                context.scene.mbt_painter.matching_report = ''
                 message = f'Valid setup: {len(low)} low / {len(high)} high meshes; all pairs resolved'
             elif self.action == 'PREPARE':
                 message = jobs.prepare(context, ignore_warnings=self.ignore_warnings)
@@ -179,6 +204,7 @@ class MBT_OT_painter_connect(bpy.types.Operator):
     bl_description = 'Connect locally or launch Painter with remote scripting; never closes an open project'
     ignore_warnings: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
     action: EnumProperty(items=(('OPEN', 'Open Painter Project', 'Open the associated project for texturing without refreshing or baking'),
+                               ('CAPABILITIES', 'Inspect Projection Capabilities', 'Read actual Painter bake properties; do not change the project'),
                                ('DETECT', 'Detect Executable', ''), ('TEST', 'Test Connection', ''),
                                ('CONNECT', 'Launch / Connect', ''), ('SEND', 'Send to Painter', ''),
                                ('EXPORT', 'Export from Painter / Import', 'Export current job textures and update Blender materials'),
@@ -229,6 +255,8 @@ class MBT_OT_painter_new_project(bpy.types.Operator):
     def execute(self, context):
         context.scene.mbt_painter.project_file = ''
         context.scene.mbt_painter.last_job = ''
+        context.scene.mbt_painter.matching_report = ''
+        context.scene.mbt_painter.issue_rows.clear()
         context.scene.mbt_painter.report = 'Next Bake creates a new project. Close the previous project in Painter first.'
         return {'FINISHED'}
 
@@ -247,7 +275,10 @@ class MBT_OT_painter_cancel(bpy.types.Operator):
         return {'FINISHED'}
 
 
-classes = (MBT_OT_painter_issues, MBT_OT_painter_texture_set, MBT_OT_painter_assign, MBT_OT_painter_action, MBT_OT_painter_connect,
+from .issues import classes as issue_classes
+
+
+classes = issue_classes + (MBT_OT_painter_status_details, MBT_OT_painter_issues, MBT_OT_painter_texture_set, MBT_OT_painter_assign, MBT_OT_painter_action, MBT_OT_painter_connect,
            MBT_OT_painter_new_project, MBT_OT_painter_cancel)
 
 

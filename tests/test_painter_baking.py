@@ -108,12 +108,13 @@ def configuration_tests():
             return labels[label]
     common = {key: Property() for key in ('OutputSize', 'HipolyMesh', 'LowAsHigh',
         'MaxHeight', 'MaxDepth', 'RelativeScale', 'SubSampling', 'FilterMethod', 'CageMode',
-        'LowpolySuffix', 'HipolySuffix')}
+        'LowpolySuffix', 'HipolySuffix', 'SmoothNormals')}
     color = Property()
     params = Mock()
     params.common.return_value = common
     params.baker.return_value = {'ColorSource': color}
     baking.BakingParameters = Mock()
+    baking.unlink_all_common_parameters = Mock()
     baking.BakingParameters.from_texture_set.return_value = params
     baking.CurvatureMethod = types.SimpleNamespace(FromMesh='mesh')
     baking.BakingStatus = types.SimpleNamespace(Success='success', Cancel='cancel')
@@ -145,6 +146,7 @@ def configuration_tests():
             assert values[common['OutputSize']] == (9, 9)
             assert values[common['HipolyMesh']] == high.resolve().as_uri()
             assert values[common['LowAsHigh']] is False
+            assert common['SmoothNormals'] not in values, 'Legacy manifests must retain behavior'
             assert values[common['MaxDepth']] == 0.02
             assert values[common['FilterMethod']] == 1
             assert values[common['LowpolySuffix']] == '_low'
@@ -179,19 +181,47 @@ def configuration_tests():
         job['set_definitions'] = [
             {'texture_set': 'MBT_Test', 'resolution': 1024, 'bake_maps': ['NORMAL'], 'baking': job['baking']},
             {'texture_set': 'MBT_Detail', 'resolution': 2048, 'bake_maps': ['AO'],
-             'baking': dict(job['baking'], front_distance=0.15)}]
+              'baking': dict(job['baking'], front_distance=0.15, projection_normals='FACE')}]
+        job['set_definitions'][0]['baking'] = dict(job['baking'], projection_normals='AVERAGED')
         manifest.write_text(json.dumps(job), encoding='utf-8')
         params.reset_mock()
+        # Missing isolation must fail before resolution changes or bake startup.
+        unlink = baking.unlink_all_common_parameters
+        del baking.unlink_all_common_parameters
+        baking.BakingParameters.set.reset_mock()
+        baking.bake_selected_textures_async.reset_mock()
+        failed = json.loads(namespace['_mbt_bake'](str(manifest)))
+        assert failed['state'] == 'FAILED' and 'isolate' in failed['error'], failed
+        baking.BakingParameters.set.assert_not_called()
+        baking.bake_selected_textures_async.assert_not_called()
+        first_set.set_resolution.assert_not_called()
+        baking.unlink_all_common_parameters = unlink
+        def isolated_common():
+            unlink.assert_called_once_with()
+            return common
+        params.common.side_effect = isolated_common
         assert json.loads(namespace['_mbt_bake'](str(manifest)))['state'] == 'BAKING'
+        unlink.assert_called_once_with()
         values = baking.BakingParameters.set.call_args.args[0]
         assert values[common['OutputSize']] == (10, 10)
         assert values[other_common['OutputSize']] == (11, 11)
         assert values[other_common['MaxHeight']] == 0.15
+        assert values[common['SmoothNormals']] is True
+        assert values[other_common['SmoothNormals']] is False
         first_set.set_resolution.assert_called_once_with((1024, 1024))
         second_set.set_resolution.assert_called_once_with((2048, 2048))
         params.set_baker_enabled.assert_any_call(usages.AO, False)
         other_params.set_baker_enabled.assert_any_call(usages.AO, True)
         other_params.set_baker_enabled.assert_any_call(usages.Normal, False)
+        callbacks['ended'](types.SimpleNamespace(status='success'))
+        params.common.side_effect = None
+        # Equal settings do not needlessly change project linking.
+        job['set_definitions'][1].update(resolution=1024,
+            baking=dict(job['set_definitions'][0]['baking']))
+        manifest.write_text(json.dumps(job), encoding='utf-8')
+        unlink.reset_mock()
+        assert json.loads(namespace['_mbt_bake'](str(manifest)))['state'] == 'BAKING'
+        unlink.assert_not_called()
         callbacks['ended'](types.SimpleNamespace(status='success'))
     print('PASS: bake configuration, events, terminal states, save gating and startup cleanup', flush=True)
 

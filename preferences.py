@@ -1,6 +1,7 @@
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, IntProperty, FloatProperty, StringProperty
 from .core.pie_data import KEY_ITEMS, MBT_PieMenu
+from .core.script_data import MBT_ScriptFavorite
 
 from .core.registry import register_classes, unregister_classes
 from .core.addon import get_prefs
@@ -103,6 +104,8 @@ class MBT_Preferences(bpy.types.AddonPreferences):
 
     pies: CollectionProperty(type=MBT_PieMenu)
     modifier_favorites: CollectionProperty(type=MBT_ModifierFavorite)
+    script_favorites: CollectionProperty(type=MBT_ScriptFavorite)
+    script_favorite_index: IntProperty(default=0, min=0, options={'SKIP_SAVE'})
     n_panel_tabs: CollectionProperty(type=sidebar_data.MBT_NPanelTab)
     sidebar_sections: StringProperty(name='Visible Toolkit Sections', default=DEFAULT_SELECTION,
         description='Selected MBToolkit sections in click order; independent of whole sidebar tabs')
@@ -196,7 +199,7 @@ for _key, _label, _default, _paths in feature_manager.FEATURES:
         description=f'Load {_label}; disabled features are skipped on the next startup')
 
 
-classes = (MBT_ModifierFavorite, MBT_OT_modifier_favorite) + preferences_ui.classes + (sidebar_data.MBT_NPanelTab, MBT_Preferences)
+classes = (MBT_ModifierFavorite, MBT_ScriptFavorite, MBT_OT_modifier_favorite) + preferences_ui.classes + (sidebar_data.MBT_NPanelTab, MBT_Preferences)
 
 
 def register():

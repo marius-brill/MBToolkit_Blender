@@ -23,6 +23,23 @@ Blender configuration. To test code directly from the checkout, use the scripts
 in [tests/README.md](tests/README.md); they handle importing the source checkout.
 Restart Blender after module/lifecycle changes to avoid stale Python state.
 
+### Painter access for coding agents and future live tests
+
+Start with the connect-only procedure in [tests/README.md](tests/README.md#painter-remote-access-preflight).
+Do not conclude that Painter is unavailable from an IPv4-only request: on this
+machine the verified endpoint is IPv6 `::1`, port `60041`. Use the repository probe
+and existing bridge fallback, not a separate networking implementation. If Painter
+is already running, inspect/connect first; do not terminate it or start another
+instance to enable scripting. Preserve any unrelated open project. Destructive
+tests must use their documented disposable-project guards. Remote scripting is
+arbitrary code execution: keep it local; do not expose the port externally.
+
+Agents can start Painter themselves: run `tests/probe_painter_remote.py --launch`
+with the absolute checkout path and Blender's bundled ordinary Python interpreter,
+as shown in the testing guide. It safely connects first, then launches with remote
+scripting only when no Painter process is running. Do not ask the user to launch
+an absent instance manually; preserve an existing unreachable session instead.
+
 ## Code and pull requests
 
 - Follow the surrounding code: four-space Python indentation, relative imports,

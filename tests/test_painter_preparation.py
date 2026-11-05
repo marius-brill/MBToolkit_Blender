@@ -116,6 +116,17 @@ def main():
             runtime.start_preparation(bpy.context, 'AUTO')
             timer = runtime._timer
             assert timer() == 0.05
+            low.data.vertices[0].co.x += 0.01
+            low.data.update()
+            bpy.context.view_layer.update()
+            assert timer() is None
+            assert 'Geometry changed during preparation' in settings.report
+            assert runtime.preparation._geometry_changed not in bpy.app.handlers.depsgraph_update_post
+            connect.assert_not_called()
+        with patch.object(runtime.bridge, 'connect') as connect:
+            runtime.start_preparation(bpy.context, 'AUTO')
+            timer = runtime._timer
+            assert timer() == 0.05
             high.name = 'RenamedDuringPreparation'
             assert timer() is None
             assert 'inputs or settings changed' in settings.report

@@ -64,7 +64,8 @@ def run():
     assert not hasattr(bpy.types.Scene, 'mbt_uv')
     assert not hasattr(bpy.types.Scene, 'mbt_painter')
     assert not hasattr(bpy.types.Object, 'mbt_modifier_index')
-    assert addon.panels._registered == [addon.panels.MBT_PT_main]
+    assert addon.panels._registered == [addon.panels.MBT_PT_main, addon.panels.MBT_PT_baking]
+    assert not addon.panels.MBT_PT_baking.poll(bpy.context)
     for name in ('GENERAL', 'MODIFIERS', 'PIES', 'PERFORMANCE', 'UV', 'N_PANEL', 'PAINTER', 'ABOUT'):
         draw(prefs, name)
     pie.key = 'Q'  # Must not rebuild disabled keymaps.

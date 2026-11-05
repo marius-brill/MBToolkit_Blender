@@ -33,14 +33,25 @@ def main():
 
     first = pair('Body')
     second = pair('Trim')
+    second[0].data.uv_layers.active.name = 'TrimUV'
+    second[0].data.uv_layers.new(name='UnusedUV').active_render = True
     assert len(settings.texture_sets) == 1
     default = settings.texture_sets[0]
+    assert default.collection.name == 'TextureSet1'
+    assert default.low_collection.name == 'TextureSet1_low'
+    assert default.high_collection.name == 'TextureSet1_high'
+    assert default.low_collection.color_tag == 'COLOR_05'
+    assert default.high_collection.color_tag == 'COLOR_02'
     assert settings.low_collection in default.collection.children_recursive
     settings.resolution = '1024'
     settings.front_distance = 0.02
+    settings.auto_distances = False
     assert default.resolution == '1024'
     bpy.ops.mbt.painter_texture_set(action='ADD')
     details = settings.texture_sets[1]
+    assert details.collection.name == 'TextureSet2'
+    assert details.low_collection.name == 'TextureSet2_low'
+    assert details.high_collection.name == 'TextureSet2_high'
     details.collection.name = 'Details'
     third = pair('Detail')
     settings.resolution = '512'
@@ -93,6 +104,16 @@ def main():
             image.save()
             bpy.data.images.remove(image)
         materials.import_maps(bpy.context)
+        assert first[0].data.materials[0] == second[0].data.materials[0]
+        assert first[0].data.materials[0] != third[0].data.materials[0]
+        counts = len(bpy.data.materials), len(bpy.data.images)
+        shared = first[0].data.materials[0]
+        materials.import_maps(bpy.context)
+        assert first[0].data.materials[0] == second[0].data.materials[0] == shared
+        assert counts == (len(bpy.data.materials), len(bpy.data.images))
+        assert second[0].data.uv_layers['TrimUV'].active_render
+        assert next(node for node in shared.node_tree.nodes if node.type == 'UVMAP').uv_map == ''
+        assert next(node for node in shared.node_tree.nodes if node.type == 'NORMAL_MAP').uv_map == ''
         a = first[0].data.materials[0].node_tree.nodes['MBT_base_color'].image
         b = second[0].data.materials[0].node_tree.nodes['MBT_base_color'].image
         c = third[0].data.materials[0].node_tree.nodes['MBT_base_color'].image

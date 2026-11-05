@@ -1,28 +1,58 @@
 """Lightweight input guards and operation timings for staged preparation."""
 import json
 import time
+import bpy
 
 from . import jobs
+
+_geometry_revision = 0
+
+
+def _geometry_changed(scene, depsgraph):
+    global _geometry_revision
+    if any(update.is_updated_geometry for update in depsgraph.updates):
+        _geometry_revision += 1
+
+
+def begin_tracking():
+    if _geometry_changed not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(_geometry_changed)
+    return _geometry_revision
+
+
+def geometry_revision():
+    return _geometry_revision
+
+
+def end_tracking():
+    if _geometry_changed in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_geometry_changed)
 
 
 def signature(context):
     """No mesh copies: detect structural/settings changes between UI ticks.
 
     This deliberately does not hash millions of vertex coordinates per tick.
-    Same-topology coordinate edits and external dependency changes need separate
-    dependency tracking; callers must not present this as a complete scene lock.
+    Runtime separately tracks dependency-graph geometry revisions between steps.
+    Conservative tracking also stops on unrelated geometry edits during a bake.
     """
     settings = context.scene.mbt_painter
     values = []
     for prop in settings.bl_rna.properties:
         key = prop.identifier
-        if key in {'rna_type', 'report', 'advanced', 'bake_settings', 'preparation_timings'}:
+        if key in {'rna_type', 'report', 'matching_report', 'advanced', 'bake_settings', 'preparation_timings',
+                    'issue_rows', 'issue_index', 'issue_blocking_only', 'projection_report'}:
             continue
         value = getattr(settings, key)
         values.append((key, tuple(sorted(value)) if isinstance(value, set) else
                        value.as_pointer() if hasattr(value, 'as_pointer') else value))
     objects = []
-    for obj in jobs.meshes(settings.low_collection) + jobs.meshes(settings.high_collection):
+    from .texture_sets import inputs, entries, properties
+    set_values = tuple((getattr(entry, 'set_id', ''), tuple(
+        (field, tuple(sorted(value)) if isinstance(value, set) else
+         value.as_pointer() if hasattr(value, 'as_pointer') else value)
+        for field in properties.SET_FIELDS for value in [getattr(entry, field)])) for entry in entries(settings))
+    for obj in dict.fromkeys(inputs(settings)):
         modifiers = []
         for modifier in obj.modifiers:
             properties = []
@@ -38,7 +68,7 @@ def signature(context):
                         obj.mbt_bake_group,
                         obj.mbt_bake_target.as_pointer() if obj.mbt_bake_target else 0,
                         tuple(modifiers)))
-    return tuple(values), tuple(objects), context.scene.frame_current
+    return tuple(values), set_values, tuple(objects), context.scene.frame_current
 
 
 def measured_steps(context, steps):

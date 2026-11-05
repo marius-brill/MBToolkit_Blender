@@ -32,6 +32,7 @@ projects and textures are not removed by uninstalling the add-on.
 ## Documentation and support
 
 - [UV tools guide](UV_SUITE.md)
+- [Vertex color controls and channel preview](VERTEX_COLOR.md)
 - [Substance Painter setup and workflow](SUBSTANCE_PAINTER.md)
 - [Development, packaging, and release checklist](CONTRIBUTING.md)
 - [Test commands and safety precautions](tests/README.md)
@@ -47,7 +48,7 @@ For sensitive vulnerabilities, follow SECURITY.md instead of opening a public is
 ### Troubleshooting and safety
 
 - Missing features: enable their switches in **General** preferences, then check
-  the section selector. UV, Painter, Geometry Nodes and Resample start disabled.
+  the section selector. UV, Vertex Color, Painter, Geometry Nodes and Resample start disabled.
 - Missing panel: use a 3D Viewport, open its sidebar with **N**, and check whether
   Sidebar Tab Management has hidden the MBToolkit tab.
 - Shortcut conflicts: configure MBToolkit's shortcut preferences or Blender's keymap.
@@ -62,7 +63,7 @@ For sensitive vulnerabilities, follow SECURITY.md instead of opening a public is
 Open **Edit > Preferences > Add-ons > MBToolkit > General** to choose which
 features load. Script Runner, Rename / Clean Up, Align, Sidebar Tab Manager,
 Pie Menus, Modifier Tools and Scene Performance are enabled by default.
-UV Tools, Substance Painter Bridge / Bake, Geometry Nodes / Low-to-High and
+UV Tools, Vertex Color, Substance Painter Bridge / Bake, Geometry Nodes / Low-to-High and
 Resample are disabled by default.
 
 Switches apply in the current session, including removal of feature panels,
@@ -131,6 +132,16 @@ mbtoolkit/
 
 Each feature module exposes `classes`, `register()/unregister()` and, if it has N panel UI, a `draw(layout, context)`.
 
+## Vertex Color
+
+Enable **Vertex Color** in General preferences, then choose the lavender-pink
+triangle/vertices icon in the sidebar. Create/select a color attribute, click
+**Edit Color…** for a live native picker with cancel restoration, or choose a
+**Fill Color** and press **Fill**. RGB Write buttons start enabled; alpha starts
+protected. Preview RGB or any individual R/G/B/A component without changing
+materials or stored values. See [the full guide](VERTEX_COLOR.md) for selection,
+batch editing, color spaces, attribute management and preview limitations.
+
 ## Modifier list
 
 - Modifier Properties shows compact favorites with at most four buttons per row,
@@ -183,7 +194,9 @@ fresh snapshots, connect/launch Painter, create or update the associated project
 bake, save, export textures and update Blender materials. Internal job files are
 managed automatically. Collection assignment moves meshes rather than adding links.
 Name matching uses explicit Bake Targets, existing names, or conservative sampled
-surface matching; ambiguous inputs stop with an actionable error. Project templates
+surface matching. Uncertain matches no longer stop Bake: best-effort assignments
+are used and matching issues are listed afterwards in Bake Status Details. Inspect
+these results and correct Bake Targets or Groups when needed. Project templates
 can be set globally or per scene. The default export definition is automatic;
 advanced custom unpacked PNG mappings and painting-only texture updates are supported.
 See [SUBSTANCE_PAINTER.md](SUBSTANCE_PAINTER.md) for the workflow, supported texture
@@ -333,7 +346,14 @@ The integration tests exercise registration cycles, count changes, selection, in
 - **Align Tools**: Drop objects to ground or move to target location
 - **Incremental Rename**: Rename selected objects with a base name and sequential numbering
 - **Scene Performance**: Monitor triangle count and modifier evaluation times with automatic updates and viewport-synced selection
-- **Script Runner**: Execute external Python scripts directly from the N panel
+- **Script Runner**: Execute external Python scripts directly from the N panel.
+  Choose a `.py` file and click the star to bookmark it. The Favorites dropdown
+  selects a script without executing it; click **Run Script** to run the latest
+  contents from disk. **Manage Favorites** lets you rename, reorder, remove, or
+  relink bookmarks (the original files are never copied or deleted). Favorites
+  live in add-on preferences and are shared across `.blend` files. If Blender's
+  Auto-Save Preferences is off, use **Save Preferences** in the management popup
+  to retain changes across restarts. Only run scripts you trust.
 - **Pie Menu Editor**: Custom pie menu creator setup
 - **Clean Up Mesh**:
 - **Modifier List**: Change modifier stack to list view with favorites

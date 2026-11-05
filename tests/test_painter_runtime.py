@@ -90,11 +90,19 @@ def main():
             assert bake.call_args.args == (client, path)
             assert calls == ['record', 'import']
 
+            settings.matching_report = 'Sculpt: ambiguous low groups. Best-effort assignment: Body.'
+            runtime.start(bpy.context, 'AUTO')
+            report = finish()
+            assert 'Materials updated' in report and 'Matching issues' in report
+            assert settings.matching_report in report
+            assert calls[-2:] == ['record', 'import']
+
             calls.clear()
             send.side_effect = runtime.bridge.BridgeError('reload failed')
             bake.reset_mock()
             runtime.start(bpy.context, 'AUTO')
-            assert 'reload failed' in finish()
+            report = finish()
+            assert 'reload failed' in report and settings.matching_report in report
             bake.assert_not_called()
             assert not calls
             send.side_effect = None
@@ -105,7 +113,9 @@ def main():
 
             send.side_effect = cancel_send
             runtime.start(bpy.context, 'AUTO')
-            assert 'cancelled before baking' in finish()
+            report = finish()
+            assert 'cancelled before baking' in report and settings.matching_report in report
+            settings.matching_report = ''
             bake.assert_not_called()
             assert not calls
             send.side_effect = None

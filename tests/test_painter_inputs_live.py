@@ -31,7 +31,7 @@ def main():
         bpy.ops.mesh.primitive_cube_add()
         obj = bpy.context.object
         obj.name = f'body_low_{index}'
-        obj.mbt_bake_group = 'Body'
+        obj.mbt_bake_group = 'Panel_low_trim'
         bpy.ops.mbt.painter_assign(role='LOW')
         # Offset a whole face/island, not individual corners, like a mirrored shell.
         for loop in obj.data.polygons[0].loop_indices:
@@ -40,7 +40,7 @@ def main():
     bpy.ops.mesh.primitive_cube_add()
     high = bpy.context.object
     high.name = 'body_high'
-    high.mbt_bake_group = 'Body'
+    high.mbt_bake_group = 'Panel_low_trim'
     bevel = high.modifiers.new('Bake detail', 'BEVEL')
     bevel.width, bevel.segments = 0.04, 3
     bpy.ops.mbt.painter_assign(role='HIGH')
@@ -51,6 +51,7 @@ def main():
     settings.low_collection.hide_viewport = True
     jobs.prepare(bpy.context, automatic=True)
     job = jobs.read_job(settings.last_job)
+    assert all(name.count('_low') + name.count('_high') == 1 for name in job['mesh_names'].values())
     guarded = False
     try:
         client.execute('_mbt_guard_acquire()')
@@ -66,7 +67,7 @@ def main():
         assert settings.low_collection.hide_viewport
         (directory / 'result.json').write_text(json.dumps({'status': 'PASS', 'job': settings.last_job,
             'checks': ['two lows to one high', 'positive/negative offset islands', 'hidden low collection',
-                       'protected Painter window', 'bake/save/export/import']}, indent=2))
+                       'interior role-token export names', 'protected Painter window', 'bake/save/export/import']}, indent=2))
         print('PASS LIVE: two lows/one high, offset islands, hidden collection, protected bake/save/export/import', flush=True)
     finally:
         if guarded:

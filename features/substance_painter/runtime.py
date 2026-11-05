@@ -14,6 +14,24 @@ _cancel = None
 _timer = None
 _preparation = None
 _scene = None
+_started = None
+_elapsed = 0.0
+
+
+def begin_clock():
+    global _started, _elapsed
+    _started = time.monotonic()
+    _elapsed = 0.0
+
+
+def elapsed_seconds():
+    return max(0.0, time.monotonic() - _started) if _started is not None else _elapsed
+
+
+def finish_clock():
+    global _started, _elapsed
+    _elapsed = elapsed_seconds()
+    _started = None
 
 
 def cancel():
@@ -46,18 +64,21 @@ def start_preparation(context, action, ignore_warnings=False):
     if busy():
         raise jobs.PainterError('A Painter request is already running')
     initial_signature = preparation.signature(context)
+    geometry_revision = preparation.begin_tracking()
     generation = _generation
     cancellation = threading.Event()
     _scene = scene
+    begin_clock()
     _pending = queue.Queue()
     _cancel = cancellation
     _preparation = preparation.measured_steps(context, jobs.prepare_steps(
         context, automatic=action == 'AUTO', ignore_warnings=ignore_warnings))
     scene.mbt_painter.report = 'Preparing mesh snapshots'
-    started = time.monotonic()
+    last_update = float('-inf')
 
     def advance():
         global _pending, _cancel, _timer, _preparation
+        nonlocal last_update, geometry_revision
         if generation != _generation:
             return None
         try:
@@ -72,13 +93,22 @@ def start_preparation(context, action, ignore_warnings=False):
                 raise jobs.PainterError('Preparation window was closed; bake stopped')
             if preparation.signature(bpy.context) != initial_signature:
                 raise jobs.PainterError('Bake inputs or settings changed during preparation; bake stopped. Retry Bake.')
+            if preparation.geometry_revision() != geometry_revision:
+                raise jobs.PainterError('Geometry changed during preparation; bake stopped. Retry Bake.')
             # UI timers do not inherit an operator context. Retain the initiating window.
             with bpy.context.temp_override(window=window, scene=scene):
                 message = next(_preparation)
-            scene.mbt_painter.report = f'{message} ({int(time.monotonic() - started)}s)'
+            # Snapshot/export temporarily reveals objects and rebuilds graphs.
+            # Those synchronous internal changes are safe; edits between ticks are not.
+            geometry_revision = preparation.geometry_revision()
+            now = time.monotonic()
+            if now - last_update >= 0.2:
+                scene.mbt_painter.report = message
+                last_update = now
             redraw()
             return 0.05
         except StopIteration:
+            preparation.end_tracking()
             _preparation = None
             _pending = None
             _cancel = None
@@ -145,9 +175,11 @@ def start(context, action, ignore_warnings=False, _prepared=False):
         if action == 'BAKE':
             jobs.update_bake_settings(job_path, context.scene.mbt_painter)
     scene = context.scene
+    if not _prepared:
+        begin_clock()
+    matching_report = scene.mbt_painter.matching_report if action in {'AUTO', 'BAKE', 'EXPORT'} else ''
     _scene = scene
     scene.mbt_painter.report = 'Connecting to Painter...'
-    started = time.monotonic()
     stage = 'Connecting to Painter'
     results = queue.Queue()
     generation = _generation
@@ -189,6 +221,10 @@ def start(context, action, ignore_warnings=False, _prepared=False):
                 result = bridge.export_maps(client, job_path)
                 completion = result
                 return
+            elif action == 'CAPABILITIES':
+                import json
+                message = 'Projection capabilities: ' + json.dumps(
+                    client.execute('_mbt_projection_capabilities()'), ensure_ascii=False)
             elif action != 'SEND':
                 message = f"Connected to Painter (Python API {info['version']}); project open: {info['project_open']}; busy: {info['busy']}"
             completion = message
@@ -216,7 +252,7 @@ def start(context, action, ignore_warnings=False, _prepared=False):
                 break
             if done:
                 break
-        message = stage if done else f'{stage} ({int(time.monotonic() - started)}s)'
+        message = stage
         if done:
             _pending = None
             _cancel = None
@@ -235,9 +271,13 @@ def start(context, action, ignore_warnings=False, _prepared=False):
                         message = 'Exported from Painter. ' + materials.import_maps(bpy.context)
                     except Exception as error:
                         message = 'Export/import failed: ' + str(error)
+                if done and matching_report:
+                    message += '\n\nMatching issues (best-effort bake; inspect results):\n' + matching_report
                 scene.mbt_painter.report = message
         except ReferenceError:
             pass  # File reload/deleted scene while the remote request was running.
+        if done:
+            finish_clock()
         for window in bpy.context.window_manager.windows:
             for area in window.screen.areas:
                 area.tag_redraw()
@@ -255,6 +295,8 @@ def start(context, action, ignore_warnings=False, _prepared=False):
 def cleanup():
     global _pending, _generation, _cancel, _timer, _preparation, _scene
     cancel()
+    preparation.end_tracking()
+    finish_clock()
     _generation += 1
     _pending = None
     _cancel = None

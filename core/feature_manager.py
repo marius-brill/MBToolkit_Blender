@@ -16,6 +16,7 @@ FEATURES = (
     ('modifier_list', 'Modifier Tools', True, ('modifier_list',)),
     ('scene_stats', 'Scene Performance', True, ('scene_stats',)),
     ('uv_tools', 'UV Tools', False, ('uv_tools',)),
+    ('vertex_color', 'Vertex Color', False, ('vertex_color',)),
     ('substance_painter', 'Substance Painter Bridge / Bake', False, ('substance_painter',)),
     ('geonodes', 'Geometry Nodes / Low-to-High', False, ('geonodes',)),
     ('resample', 'Resample', False, ('resample',)),

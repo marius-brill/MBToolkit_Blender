@@ -27,7 +27,7 @@ def selector_columns(context, count):
 
 def visible_sections(prefs):
     return [key for key in decode_selection(prefs.sidebar_sections)
-            if feature_manager.is_enabled(key)]
+            if key != 'substance_painter' and feature_manager.is_enabled(key)]
 
 
 def redraw(context):
@@ -60,6 +60,8 @@ class MBT_OT_select_section(bpy.types.Operator):
             return {'CANCELLED'}
         if not feature_manager.is_enabled(self.section):
             return {'CANCELLED'}
+        if self.section == 'substance_painter':
+            return {'CANCELLED'}  # Baking now has its own sidebar category.
         prefs.sidebar_sections = select_section(prefs.sidebar_sections, self.section, self.extend)
         context.preferences.is_dirty = True
         redraw(context)
@@ -104,7 +106,8 @@ class MBT_PT_main(bpy.types.Panel):
             layout.label(text='Initializing MBToolkit…', icon='INFO')
             return
         selected = visible_sections(prefs)
-        available = [entry for entry in SECTIONS if feature_manager.is_enabled(entry[0])]
+        available = [entry for entry in SECTIONS
+                     if entry[0] != 'substance_painter' and feature_manager.is_enabled(entry[0])]
         columns = selector_columns(context, len(available))
         for start in range(0, len(available), columns):
             toolbar = layout.row(align=True)
@@ -127,7 +130,27 @@ class MBT_PT_main(bpy.types.Panel):
             draw_section(layout, context, key)
 
 
-classes = (MBT_OT_select_section, MBT_PT_main)
+class MBT_PT_baking(bpy.types.Panel):
+    bl_idname = 'MBT_PT_baking'
+    bl_label = 'MBToolkit Baking'
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'MBT Baking'
+
+    @classmethod
+    def poll(cls, context):
+        return feature_manager.is_enabled('substance_painter') and hasattr(context.scene, 'mbt_painter')
+
+    def draw_header_preset(self, context):
+        self.layout.operator('mbt.open_prefs', text='', icon='PREFERENCES')
+
+    def draw(self, context):
+        self.layout.use_property_decorate = False
+        module = import_module(f'{ADDON_ID}.features.substance_painter')
+        module.draw(self.layout, context)
+
+
+classes = (MBT_OT_select_section, MBT_PT_main, MBT_PT_baking)
 # Kept as panels-only bookkeeping for feature lifecycle callers/tests.
 _registered = []
 _running = False
@@ -150,7 +173,7 @@ def register():
                 unregister_classes((cls,))
         section_icons.unregister()
         raise
-    _registered.append(MBT_PT_main)
+    _registered.extend((MBT_PT_main, MBT_PT_baking))
     _running = True
 
 
