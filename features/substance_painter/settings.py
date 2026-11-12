@@ -81,9 +81,9 @@ from .issues import MBT_PainterIssue, MBT_PainterIssueTarget
 
 class MBT_PainterSettings(bpy.types.PropertyGroup):
     ui_tab: EnumProperty(name='Baking Tab', items=(
-        ('MODEL', 'Model', 'Reserved for future modeling tools'),
+        ('MODEL', 'Model', 'Asset and component records; source meshes remain unchanged'),
         ('BAKE', 'Bake', 'Complete Painter setup, baking and texture workflow'),
-        ('EXPORT', 'Export', 'Reserved for future export tools')),
+        ('EXPORT', 'Export', 'Export the active asset as Painter-ready FBX without launching Painter')),
         default='BAKE')
     issue_rows: CollectionProperty(type=MBT_PainterIssue)
     issue_index: IntProperty(default=0, min=0, options={'SKIP_SAVE'})

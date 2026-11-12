@@ -44,6 +44,7 @@ class RepositoryTests(unittest.TestCase):
     def test_local_document_links(self):
         documents = list(ROOT.glob('*.md')) + list((ROOT / 'tests').glob('*.md'))
         documents += list((ROOT / '.github').rglob('*.md'))
+        documents += list((ROOT / 'docs').rglob('*.md'))
         for document in documents:
             for target in re.findall(r'\[[^\]]*\]\(([^\s)]+)\)',
                                      document.read_text(encoding='utf-8')):
@@ -52,6 +53,25 @@ class RepositoryTests(unittest.TestCase):
                     continue
                 with self.subTest(document=document.name, target=target):
                     self.assertTrue((document.parent / unquote(parsed.path)).exists())
+
+    def test_asset_processor_wiki(self):
+        directory = ROOT / 'docs' / 'asset-processor'
+        pages = ('README.md', 'quick-start.md', 'concepts.md', 'workflow.md',
+                 'reference.md', 'troubleshooting.md', 'developer-guide.md',
+                 'documentation.md')
+        for name in pages:
+            with self.subTest(page=name):
+                page = directory / name
+                self.assertTrue(page.is_file(), name)
+                text = page.read_text(encoding='utf-8')
+                self.assertTrue(text.startswith('# '), name)
+                self.assertEqual(len(re.findall(r'^# ', text, re.MULTILINE)), 1)
+                if name != 'README.md':
+                    self.assertIn('(README.md)', text)
+                    self.assertIn('(' + name + ')',
+                                  (directory / 'README.md').read_text(encoding='utf-8'))
+        self.assertIn('(docs/asset-processor/README.md)',
+                      (ROOT / 'README.md').read_text(encoding='utf-8'))
 
     def test_build_exclusions(self):
         manifest = tomllib.loads((ROOT / 'blender_manifest.toml').read_text(encoding='utf-8'))

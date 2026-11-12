@@ -11,9 +11,12 @@ Its **Model / Bake / Export** selector reuses the expanded button-row layout:
   Bake Status/Issues, Open Painter Project, then Advanced / Troubleshooting.
   Advanced includes custom export mapping, Update Textures (No Bake), New Project
   Next Bake, connection/diagnostic actions and Retry Material Import.
-- **Model** and **Export** are currently empty placeholders for future tools.
+- **Model** contains assets/components, DynaBool generation, custom high assignment
+  protected UV preparation, stage diagnostics and reversible visibility previews (see below).
+- **Export** writes the active asset's low/high FBX and a manifest without Painter.
 
-Bake Status and Cancel are available in Bake while a job is running.
+Bake Status is available in Bake; Cancel remains available on every tab while a
+job is running. Switching tabs does not invalidate preparation.
 Narrow sidebars stack collection fields, map choices and paired actions;
 wider sidebars show two map columns. Low/High assignment buttons, collection
 visibility controls, issue search/filtering, Select All, Revalidate and applicable
@@ -45,6 +48,187 @@ editing in Mesh Matching. Full Details opens the original diagnostic and candida
 scores/coverage in a wider dialog. Select All, Frame, candidate-low selection,
 Revalidate and applicable UV-face selection remain available. Diagnostics are
 snapshots: revalidate after editing.
+
+## Model: assets, generation and preview
+
+For the current task-oriented manual, start with the
+[Asset Processor wiki](docs/asset-processor/README.md). It covers optional Remesh,
+configurable work allowance, automatic generation-time Bake registration and
+protected UV workflows. Older implementation statements below are superseded
+where they conflict with that reference.
+
+### UV preparation and validation
+
+After generating a low, choose **UV Preparation**:
+
+- **Preserve** validates existing UVs without changing seams or coordinates.
+- **Assisted** (default) builds disposable proposals using the existing UV suite's
+  seam-region generation, unwrap-method search and packing. Select a proposal and
+  enter Edit Mode / the UV Editor to inspect or adjust it. **Show UV Proposal**
+  reveals the current proposal; **Prepare UVs** rebuilds it. Return to Object Mode
+  before applying or discarding.
+- **Automatic** prepares and applies only when every member of the same texture set
+  is also Automatic and explicitly unlocked. It never silently bypasses UV protection.
+
+**Protect UV Layout** defaults on, including textured meshes. Proposals do not change
+working lows or source objects. Applying requires every shared member unlocked and
+unchanged since preview; it updates only active UV coordinates/pins and seam flags
+on independent, local, single-user lows, keeping low object pointers stable. Other
+UV maps, material pointers/indices, shape/topology and mesh selections remain intact.
+Original/adopted lows that share source geometry are validation-only. There is no
+automatic source replacement or material reassignment. Review before texturing and
+re-enable protection once approved. **Acknowledge Reviewed UVs** updates the reviewed
+baseline without changing UVs; it is not an automatic repair.
+
+Existing seams and pins remain artist constraints. For edges that must not acquire
+new seams, use a Boolean edge-domain mesh attribute named `mbt_uv_protected` on the
+working low. Preparation refuses a proposal crossing those protected edges instead
+of forcing a cut. Proposal application rechecks seams, geometry, padding and overlap.
+
+Components sharing a texture-set ID/collection are packed jointly. Components
+without a set assignment share their asset's layout, consistent with standalone
+export materials. Resolution follows the assigned set or global Bake resolution;
+the strictest requested gap/border across members wins. Packing currently targets
+tile 1001 only. Cross-asset shared sets are refused; consolidate them before UV
+preparation. A Preserve member blocks joint repacking. Unchanged and locked members
+cannot be silently moved to accommodate another member.
+
+Use **Restore Visibility** or **Discard Proposal** to leave the preview. Proposals
+are disposable and removed before save/load or feature disable and when their
+records are removed; they are not exported or assigned to Bake collections. Existing
+visibility-preview undo/redo restoration also applies. UV work is synchronous, with
+a 50,000-face per-low limit and the UV suite's exact-check budgets.
+
+Expand **Validation** and click **Validate Asset** for read-only ANALYZE, GENERATE,
+GEOMETRY, UV and EXPORT findings. Select a finding for its reason, suggested action,
+and pointer-based Select/Frame controls. Diagnostics cover missing inputs, transform
+issues, non-finite/degenerate geometry, boundary/non-manifold edges, missing/collapsed
+UVs, cross-component overlaps, padding, tile bounds, texel-density variation,
+protected-layout drift and export planning. Open meshes, intentional stacks and
+non-unit scales may be valid: warnings require review, not blind repair. Enable
+**Allow UV Overlap** for every texture-set member only for deliberate stacks; new
+proposals still require nonoverlapping packing. Large geometry skips detailed scans
+and reports that limitation. Reports are snapshots, not bake-readiness guarantees;
+revalidate after edits. This validation does not replace the existing Bake diagnostics
+or assert thin-feature, projection, shading or texture quality.
+
+Dependency-aware **Reprocess Outdated**, partial atlas rebakes, shared-high processing
+and Blender-native baking remain deferred. A changed source never refreshes artist
+low geometry or UVs through generation.
+
+### Check Outdated (read-only dependency snapshots)
+
+Use **Dependency Status → Check Outdated** to compare current inputs with the last
+successful operation. It reports the selected component's low provenance, generated
+high and shared UV dependencies, plus asset validation and export freshness.
+States are Current, Outdated, Not Processed, Blocked and Unknown. Reasons explain
+which class of dependency changed. Reports are explicit snapshots: check again after
+editing. Panel drawing does not evaluate meshes or compute signatures.
+
+Low provenance is recorded only when a low is first generated. Source changes never
+authorize refreshing that low. Generated-high baselines are separate from the
+ownership/edit guard; edited or shared highs remain blocked. UV baselines are recorded
+after application, separately from artist-reviewed UV references. Protected/Preserve
+members block automatic UV eligibility; a source-only change does not invalidate a
+preserved working-low layout. Shared membership, geometry, seams, pins, active maps,
+protection attributes, resolution and padding participate in UV dependencies.
+
+Existing files without baselines report Unknown; checking never adopts their outputs
+as current. Versioned baselines persist across save/load; displayed snapshots do not.
+Collection-only assignments use pointer-backed IDs in processor metadata, not mutable
+collection names, without tagging or renaming artist collections. Explicit set UUIDs
+remain authoritative. Export material identifiers for collection-only/fallback groups
+now use this canonical identity, so an export made before this change can have different
+material names; inspect the new manifest before updating an existing Painter project.
+
+Checks evaluate source/export snapshots synchronously and may be expensive for dense
+modifier stacks. Current means dependency equality, not verified visual quality,
+availability of previously exported files, or bake readiness. Incomplete validation
+does not receive a current baseline. Bake handoff and Reprocess Outdated remain
+unimplemented; no check launches Painter or changes existing Bake assignments.
+
+Use **From Selection** for one component per selected mesh. Expand **Create from
+Collection** to reference all meshes in a collection and its children. These
+actions record object pointers and stable IDs only: they do not duplicate, rename,
+move or modify objects, mesh data, UVs, materials, modifiers or bake assignments.
+Asset records are stored in the blend file and do not require Painter to run.
+
+**Adopt Bake Setup** reads the active Bake texture set without migrating or
+reorganizing it. Its low meshes become component source/low references; existing
+manual Bake Targets and explicit Bake Groups supply high references. Automatic
+name/surface matching is deliberately not run. Unlinked highs are reported rather
+than guessed. Repeated adoption of an already represented low setup is refused.
+
+The compact asset/component lists allow renaming records, adding selected source
+meshes (duplicates within an asset are skipped) and removing records. Removing a
+record never deletes objects or changes the Bake setup. Expand **Component Details**
+to inspect/reassign its source, inspect adopted low/high relationships, and record
+**Protect UV Layout** intent (enabled by default). Deleted source pointers become
+missing; a newly created same-named object is never silently substituted.
+
+### Generate Component / Generate Asset
+
+Choose **DynaBool**, **Custom High** or **Disabled** per component. DynaBool uses
+the crease/subdivision/optional SDF-remesh node group on an independent
+evaluated source snapshot, not the source object. Expand **Generation Settings**
+for subdivision, crease angle, detail tolerance/smoothing and face budget. Resolution
+is automatic, with feature/thickness estimates and bounded sampled quality checks.
+Automatic Resolution stays enabled; Remesh can be unchecked for subdivision-only
+highs. Manual voxel values do not control processor generation. Generate Asset reports
+fresh per-object results and provides Select Failed Sources.
+See [automatic remeshing](AUTO_REMESH.md) for quality limits and standalone differences.
+
+The first generation creates an independent evaluated low if none is assigned.
+An existing low is **never refreshed**, even after source geometry changes: this
+protects artist edits, material assignments and textured UVs. To derive a new low,
+create a new component/asset deliberately rather than replacing a textured one.
+Generated meshes are registered automatically in reusable Bake texture-set Low/High
+collections; no manual selection/assignment is required. They have internal work names
+rather than reserved FBX export names. Source objects are not hidden or moved.
+
+High refresh keeps its object pointer stable. It refuses shared, foreign or edited
+generated high data. To retain an edited high, select it and use **Add Selected
+Highs**, switching the component to Custom High. Custom assignment does not change
+geometry or bake pointers on the artist's meshes. Multiple custom highs/floaters
+can be added; **Clear High Links** removes references only. Adopted bake components
+start in Custom High mode to avoid replacing their existing setup.
+
+Subdivision/voxel estimates reject excessive settings before DynaBool evaluation;
+an evaluated face limit rejects oversized results. These are safety bounds, not
+precise RAM/time predictions. Remeshing can lose thin features and needs visual
+review. Generate Asset processes components independently and reports failures;
+successful components are retained if another fails. Generation is synchronous:
+an individual evaluation cannot be cancelled mid-operation in this milestone.
+
+Expand **Inspector** for Source / Low / High visibility and **Restore Visibility**.
+Only referenced component meshes' view-layer hidden state is changed; unrelated
+objects and excluded collections are not changed. Preview is restored on save,
+load, undo/redo, feature disable and before generation/export. It is not a full
+isolated comparison workspace or artifact detector.
+
+### Standalone Export tab
+
+Choose Low Poly / High Poly and the shared Output Folder, then **Export Active
+Asset**. Each export creates a fresh asset-named folder containing `low.fbx`,
+`high.fbx` as requested, and `asset.json`. UUID-based `_low` / `_high` names stay
+stable across record/object renames. Components with no adopted set share one
+asset material; adopted texture-set membership is used for temporary export
+materials. Original material assignments are untouched. Missing generated/custom
+inputs, singular transforms, invalid low UVs and export naming conflicts refuse
+export; failed export folders are cleaned up. Disabled high mode contributes no
+high meshes. High-only and low-only output are supported.
+
+Shared custom highs across different components are currently refused rather than
+silently given an incorrect pairing. Fusion/shared processing groups, map exports,
+changed-only export and per-component projection overrides remain future work.
+Export does not launch Painter, change the existing job/project association or
+wire generated meshes into existing Bake collections. Use the existing Bake
+collection assignment controls explicitly when you want to bake generated meshes.
+
+Asset-stage UV proposals and validation are described above; full dependency tracking
+remains deferred. Protect UV Layout gates processor UV application, not Blender's
+native UV editing tools or existing UV operators. Existing lows are always preserved
+by generation, regardless of that setting. The existing Bake workflow is unchanged.
 
 ## Shared materials and automatic cage reach
 

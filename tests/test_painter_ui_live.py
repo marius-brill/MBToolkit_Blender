@@ -82,16 +82,31 @@ def check():
             assert not errors, errors
             runtime.cleanup()
             bpy.context.scene.mbt_painter.report = 'Saved bake job.json is missing: test path. Restore the bake folder or choose New Project Next Bake.'
+        elif stage == 7:
+            assert not errors, errors
+            bpy.ops.mbt.asset_edit(action='CREATE')
+            assets = bpy.context.scene.mbt_assets
+            assets.show_component = assets.show_collection = True
+            assets.show_processing = assets.show_inspector = True
+            assets.show_uv = assets.show_validation = True
+            bpy.ops.mbt.asset_process(action='VALIDATE')
+            bpy.ops.mbt.asset_process(action='CHECK_OUTDATED')
+        elif stage == 8:
+            assert not errors, errors
+            runtime.start_preparation(bpy.context, 'AUTO')
+            bpy.app.timers.unregister(runtime._timer)
+        elif stage == 9:
+            assert not errors, errors
         else:
             assert not errors, errors
             runtime.cleanup()
             bpy.types.VIEW3D_HT_header.remove(draw)
             addon.unregister()
-            OUTPUT.write_text(f'PASS: separate Tools/Baking panels, Bake-only real-layout collapsed/expanded/busy states, icons, visibility, status; {draws} draws\n')
+            OUTPUT.write_text(f'PASS: Tools/Baking panels, Bake and Model real-layout collapsed/expanded/busy states, lists, icons, visibility, status and cross-tab cancellation; {draws} draws\n')
             bpy.ops.wm.quit_blender()
             return None
         # Change stored UI state in the timer, never inside a draw callback.
-        bpy.context.scene.mbt_painter.ui_tab = 'BAKE'
+        bpy.context.scene.mbt_painter.ui_tab = 'MODEL' if stage in {7, 8} else 'EXPORT' if stage == 9 else 'BAKE'
         for area in bpy.context.screen.areas:
             area.tag_redraw()
         stage += 1

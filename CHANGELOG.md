@@ -1,5 +1,160 @@
 # Changelog
 
+- Group Unreal connection settings in a collapsible Connection Setup block.
+- Prevent FBX material-slot markers from creating unwanted MBT_UE material assets:
+  use copied project/reimport pipelines with shader/texture creation disabled for
+  linked meshes, preserving mesh settings and exact original material bindings.
+
+- Show short Unreal material names while retaining exact-path bindings; make
+  Assign & Preview assign on the first click and populate previews asynchronously.
+- Deduplicate Unreal discovery node IDs, retain the connected editor for batch
+  sends, and allow explicit selection when distinct sessions advertise one project.
+
+- Add Unreal material browsing, approximate texture/parameter previews, mesh/face
+  assignment and exact-path material bindings on import/reimport.
+- Add source-preserving Unreal Export Scale, defaulting to 1.0.
+
+- Fix Unreal connection discovery on custom multicast ports by reading project
+  Python configuration and supporting an explicit Discovery Endpoint override;
+  display the endpoint/source and provide connection-stage-specific errors.
+
+- Fix Unreal engine selection with Launcher/registry/standard-path discovery,
+  explicit installed-build selection, a dedicated engine browser accepting root,
+  Engine folder or editor executable, and immediate resolved-path validation.
+
+- Add optional Blender to Unreal Bridge with a dedicated MBT Unreal sidebar,
+  project/Content folder selection, source-preserving evaluated Empty hierarchy
+  FBX export, project-default Interchange import, guarded reimport and local-only
+  exact-project remote execution. Add Blender and UE 5.7 integration checks.
+
+- Replace DynaBool's triangle-target automatic mode with live weighted curvature,
+  wall/gap and dimension measurements, an observable sampling-work safeguard and
+  conservative adaptive extraction. Remove Target Triangles from new modifiers;
+  preserve manual uniform sampling and protected revision-6 upgrades. Share the
+  shape policy with checked asset generation and add shape/normal/gap, scale,
+  tiny-edge, work-limit, policy-parity and many-object regressions. Cube.029 now
+  evaluates to about 149k triangles while passing sampled fidelity checks.
+
+- Replace DynaBool's overly coarse bounding-box automatic resolution with a
+  subdivided-surface-area estimate and exposed Target Triangles (1.5 million
+  default). Calibrated on the live Cube.029 stack: 1,485,112 triangles. Preserve
+  manual override behavior and add protected upgrades from revision 5.
+
+- Make DynaBool Automatic Resolution editable in the modifier and tool/component
+  controls. Manual mode honors Voxel Size without hidden overrides or automatic
+  refinement. Reduce default automatic density with four-times-larger voxels and
+  remove standalone shortest-edge over-refinement. Add protected revision-4
+  upgrades and real-Blender triangle-density, toggle and persistence regressions.
+
+- Unify popup and Properties modifier sections with shared disclosure state and
+  matching list row limits. Replace Array's generated layout with native-style
+  offset/merge checkbox headers and conditional fit controls. Omit hidden-only
+  Additional Settings sections.
+
+- Enlarge selected modifier action buttons to 1.7× and use neutral unpressed
+  styling for Search Modifiers instead of the blue selected state.
+
+- Add icon-only Apply, Duplicate and Copy to Selected in selected modifier headers,
+  with tooltips and stable object/modifier targeting. Add Properties Ctrl+A over
+  modifier settings controls, excluding list fields and unrelated editors/tabs.
+
+- Keep modifier display modes in add-on preferences only, darken the search button
+  with theme-compatible depressed styling, and reconcile native panels against a
+  private empty template owner in Selected Settings to discard stale native panels.
+
+- Replace the plain selected-modifier property dump with source-ordered native-style
+  sections for all 83 Blender 5.2 modifier types. Add collapsible Properties sections,
+  popup boxes, conditional controls, specialized widgets and selected-instance actions.
+  Bundle offline-generated panel descriptions and retain Native Stack for exact UI.
+
+- Add Selected Settings / Native Stack display preferences below the modifier list.
+  Default to the shared selected-only RNA editor, retain the full native UI as a
+  fallback, and leave the viewport popup unchanged. No copied per-modifier layouts.
+
+- Default new Triplanar UV modifiers to each mesh's active UV map rather than a
+  separate map (UVMap fallback for meshes without UVs). Lower clay bevel radius
+  to 0.001 and migrate the old stock 0.01 radius once while preserving custom values.
+
+- Add Tools > Concepting shortcuts: non-destructive per-face Triplanar UV Geometry
+  Nodes with transform/map-name controls, and shared grey Bevel-normal clay with
+  object-level material overrides. Preserve existing UVs and unselected shared-mesh
+  users; show the Cycles-only shading requirement without changing render settings.
+  Add real-Blender projection, repeat prevention and material-isolation tests.
+
+- Preserve add-on ownership during deferred registration and sidebar panel rebuilds
+  (verified with real sidebar instances and workspace owner filtering). Keep pie
+  and modifier shortcut initialization alive across file loads, add narrow runtime
+  repair and Copy Lifecycle Diagnostics, and roll back partial class/UV/Geometry
+  Nodes/Pie registration. Do not resurrect externally hidden panels or reset scenes.
+
+- Recover deferred feature initialization after startup, File New and blend loads;
+  add Retry Initialization and hidden-tab diagnostics in General preferences.
+  Isolate feature teardown/rollback failures, stop unrelated feature toggles from
+  rebuilding sidebar panels, and recover surviving panels independently when a
+  third-party registration fails. Preserve intentional tab visibility settings.
+
+- Add a repository-owned Asset Processor wiki with quick start, concepts, workflows,
+  control reference, troubleshooting, developer notes and future publishing policy.
+  Include wiki presence and relative links in dependency-free repository checks.
+
+- Start processor remeshing from tolerance/dimensions instead of minimum sharp-edge
+  length or ray distance. Add opposing-normal/nonadjacent ray filtering, local
+  shell/thin-feature acceptance limits, conservative all-closed seam welding,
+  boundary-group diagnostics and refinement reasons. Validate copied scene meshes:
+  Object_001/021/026/033 now pass; Object_025/027 still exceed the tested 1M face
+  allowance during preservation-driven refinement; actual open boundaries remain explicit.
+
+- Replace the fixed DynaBool 2-GiB estimate rejection with configurable Work Allowance
+  (8 GiB default, zero disables). Size source features before subdivision, retain
+  subdivided-surface quality checks, and report resolution drivers/refinement attempts.
+  Regression-test the reported 6.50-GiB rejection without allocating that memory.
+
+- Restore optional DynaBool Remesh while keeping automatic resolution enabled.
+  Fix curved-surface thickness self hits and subdivision-incompatible quality checks;
+  prepare disposable highs, replace the dense-box cutoff with a sparse work estimate,
+  and show named per-object failures/counts with Select Failed Sources.
+
+- Make DynaBool always remesh with automatic resolution and processor feature/thickness
+  analysis, sampled quality checks and bounded refinement. Register generated pairs
+  in reusable Bake texture-set Low/High collections without output selection.
+  Preserve existing lows/UVs and roll back failed registration. See AUTO_REMESH.md.
+
+- Fix DynaBool disappearing at fine voxel sizes by extracting the zero SDF surface.
+  Remove the standalone SDFremesh extraction offset, add explicit protected upgrades,
+  marked standalone empty-remesh fallback/checks and strict processor failure handling.
+  Preserve old group names/fingerprints and add real-Blender geometry/rollback tests.
+  See DYNABOOL.md for existing-file upgrade steps and input limitations.
+
+- Add explicit Check Outdated dependency snapshots for low provenance, generated
+  highs, shared UV layouts, validation and standalone export. Record versioned
+  baselines only after successful operations; legacy outputs remain Unknown.
+  No automatic low refresh, UV application, export or Bake handoff is performed.
+  Centralize rename-stable texture-set identity; reject pinned-UV proposal edits
+  and lows shared by component records. Restore UV-preview selection and disclose
+  base-mesh-only topology validation for modifier outputs.
+
+- Add protected asset-stage UV preparation using the existing UV suite: Preserve,
+  Assisted proposals and explicit unlocked Automatic mode. Jointly pack derived lows
+  per texture set; preserve artist seams, pins, other UV maps, geometry and materials.
+  Guard stale/edited proposals, support protected edge attributes, and discard
+  temporary proposals on save/load, record removal or feature disable. Add read-only
+  stage diagnostics with object-pointer selection/framing and reviewed-UV baselines.
+  Original/adopted source lows remain validation-only; cross-asset UV groups are refused.
+
+- Connect Model assets to bounded DynaBool generation and Custom High assignment.
+  Preserve sources and existing lows/UVs; refresh owned, unedited highs with stable
+  object pointers. Add reversible visibility preview, subdivision/voxel budgets,
+  independent per-component batch outcomes, and standalone Painter-ready low/high
+  FBX export in new folders using the existing snapshot exporter. No Painter launch,
+  bake-set reassignment or project replacement is performed.
+
+- Add metadata-only assets/components to MBT Baking's Model tab: selection and
+  collection creation, explicit adoption of existing bake setups, stable IDs,
+  source/low/high pointers and UV-protection intent. Keep source objects and Bake
+  controls unchanged; generation/UV automation remain unavailable at this milestone.
+  Keep cancellation accessible across tabs and exclude tab selection from bake
+  preparation input signatures.
+
 - Consolidate the complete Painter workflow in the Baking panel's default Bake
   tab, restoring the original setup/output/maps/matching/bake/status/advanced order.
   Keep Model and Export empty for future tools; retain collection and responsive UI.

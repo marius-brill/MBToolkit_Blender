@@ -605,4 +605,5 @@ def unregister():
     for handlers, callback in HANDLERS:
         if callback in handlers:
             handlers.remove(callback)
-    del bpy.types.WindowManager.mbt_stats_sessions
+    if hasattr(bpy.types.WindowManager, 'mbt_stats_sessions'):
+        del bpy.types.WindowManager.mbt_stats_sessions

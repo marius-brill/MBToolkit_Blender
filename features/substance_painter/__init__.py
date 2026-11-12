@@ -15,10 +15,22 @@ def status_lines(report, width=36):
 
 def register():
     settings.register()
-    operators.register()
+    from .. import asset_processing
+    try:
+        operators.register()
+        try:
+            asset_processing.register()
+        except Exception:
+            operators.unregister()
+            raise
+    except Exception:
+        settings.unregister()
+        raise
 
 
 def unregister():
+    from .. import asset_processing
+    asset_processing.unregister()
     operators.unregister()
     settings.unregister()
 
@@ -227,7 +239,14 @@ def draw(layout, context):
     tabs = layout.row(align=True)
     tabs.scale_y = 1.25
     tabs.prop(props, 'ui_tab', expand=True)
+    if props.ui_tab == 'MODEL':
+        from ..asset_processing.ui import draw as draw_model
+        layout.separator(factor=0.5)
+        draw_model(layout, context, busy)
+        return
     if props.ui_tab != 'BAKE':
+        from ..asset_processing.ui import draw_export
+        draw_export(layout, context, busy)
         return
     layout.separator(factor=0.5)
     controls = layout.column()

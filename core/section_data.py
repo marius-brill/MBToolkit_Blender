@@ -5,7 +5,7 @@ import json
 
 # Feature key, heading, fallback icon, accent color, draw modules.
 SECTIONS = (
-    ('tools', 'Tools', 'TOOL_SETTINGS', (1.0, 0.82, 0.61), ('rename', 'clean_up')),
+    ('tools', 'Tools', 'TOOL_SETTINGS', (1.0, 0.82, 0.61), ('rename', 'clean_up', 'concepting')),
     ('align', 'Align', 'ORIENTATION_GLOBAL', (0.70, 0.86, 1.0), ('align',)),
     ('resample', 'Resample', 'OUTLINER_DATA_CURVE', (0.66, 0.94, 0.81), ('resample',)),
     ('script_runner', 'Script Runner', 'CONSOLE', (0.85, 0.76, 1.0), ('script_runner',)),

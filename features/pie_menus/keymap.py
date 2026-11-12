@@ -5,6 +5,7 @@ import bpy
 from ...core.addon import get_prefs
 
 _items = []  # (keymap, keymap_item) pairs we own
+_running = False
 
 
 def clear():
@@ -18,7 +19,8 @@ def clear():
 
 def rebuild():
     clear()
-    kc = bpy.context.window_manager.keyconfigs.addon
+    wm = bpy.context.window_manager
+    kc = wm.keyconfigs.addon if wm else None
     prefs = get_prefs()
     if kc is None or prefs is None:  # background mode, or prefs not ready yet
         return
@@ -33,16 +35,27 @@ def rebuild():
 
 
 def _delayed_init():
+    if not _running:
+        return None
+    if get_prefs() is None or bpy.context.window_manager is None:
+        return 0.2
+    if not bpy.app.background and bpy.context.window_manager.keyconfigs.addon is None:
+        return 0.2
     rebuild()
     return None  # run once
 
 
 def register():
+    global _running
+    _running = True
     # Preferences are not reliably readable while register() is still running.
-    bpy.app.timers.register(_delayed_init, first_interval=0.2)
+    if not bpy.app.timers.is_registered(_delayed_init):
+        bpy.app.timers.register(_delayed_init, first_interval=0.2, persistent=True)
 
 
 def unregister():
+    global _running
+    _running = False
     if bpy.app.timers.is_registered(_delayed_init):
         bpy.app.timers.unregister(_delayed_init)
     clear()

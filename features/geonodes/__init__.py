@@ -1,15 +1,14 @@
 """Geometry Nodes setups that get built from code and added as modifiers."""
 
 from . import crease_by_angle, dynabool, sdf_remesh
+from ...core.registry import register_modules, unregister_modules
 
 _modules = (sdf_remesh, crease_by_angle, dynabool)
 
 
 def register():
-    for m in _modules:
-        m.register()
+    register_modules(_modules)
 
 
 def unregister():
-    for m in reversed(_modules):
-        m.unregister()
+    unregister_modules(_modules)

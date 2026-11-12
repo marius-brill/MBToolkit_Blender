@@ -1,5 +1,43 @@
 # Development checks
 
+The Unreal editor integration check asserts linked import/reimport and a second
+mesh create only mesh assets (no placeholder material packages). The live sidebar
+check draws Connection Setup in both its expanded and collapsed states.
+
+`test_unreal_material_assignment.py` verifies short-name selection, duplicate-name
+identities, first-click assignment and delayed-preview selection safety in Blender.
+`test_unreal_editor_selection.py` runs without Blender and checks discovery node
+deduplication, explicit editor selection and stale-node handling. The disposable
+remote connection test also sends two assets together using the connected node.
+
+Unreal material/scale checks: `test_unreal_bridge.py` covers scaled FBX, preview
+proxies, face assignment and slot bindings. `test_unreal_bridge_editor.py` checks
+material listing, instance parameters, texture export, scaled dimensions and
+original-material reimport in the generated disposable project only.
+
+`test_unreal_engine_detection.py` runs in ordinary Python for installed-build
+discovery and manual path regressions. In disposable background Blender it also
+tests RNA callbacks and the Detect/Browse operators without opening an artist project.
+
+Unreal bridge checks: `test_unreal_bridge.py` runs in disposable background
+Blender and generates a disposable `.uproject` plus FBX; then
+`test_unreal_bridge_editor.py` runs inside that UE project only. See
+[Unreal bridge testing](../UNREAL_BRIDGE.md#development-checks). Never target an
+artist project when running these scripts.
+
+`test_dynabool_shapes.py` runs only in disposable background Blender. It tests
+shape-driven sampling, closed/manifold finite output, sampled surface error,
+sphere face-normal deviation, uniform scale stability, narrow-gap separation,
+tiny-edge insensitivity, graph/Python policy parity, work-limit signaling and a
+12-object output/timing smoke test. It optionally accepts `-- --fixture` followed
+by an absolute path to a library containing Cube.029 (not included in the repo).
+The exported personal fixture is read only; no artist project is opened or saved.
+
+`test_dynabool_resolution.py` runs in disposable background Blender and checks
+revision-4 upgrades, visible/editable automatic resolution, relative triangle
+density without a triangle target, manual override precedence, save/reload, manual component generation,
+quality-failure rollback and returning to automatic mode.
+
 These scripts are development-only; they are not required to use MBToolkit.
 Keep them in the repository, but exclude this directory from distributed add-on
 archives. The extension build settings do this automatically; when creating a ZIP
@@ -45,6 +83,128 @@ Blender; it does not run integration or GUI tests.
 
 ## Background Blender checks
 
+`test_modifier_actions.py` checks Apply/Duplicate/Copy to Selected, differing active
+and source objects, stale targets, hover-path resolution, and shortcut poll scope.
+`test_modifier_actions_live.py` uses a disposable GUI process with
+`--enable-event-simulate --factory-startup` to apply a modifier using actual hover
+and Ctrl+A events. Result: `$env:TEMP\mbt_modifier_actions_live_result.txt`.
+Text-field focus, visual icon placement and interactive Undo still need manual checks.
+
+`test_modifier_layouts.py` audits all 83 installed Blender 5.2 modifier types on
+compatible object data and checks popup/Properties control parity, shared disclosure
+state, and Array's native-style header/fit controls. The GUI audit uses the same
+disclosure renderer in both views rather than expanded popup-only boxes.
+
+The all-type audit covers
+compatible object data, every context-available writable enum branch, valid property
+and operator references, and draw-time stack immutability. Both Properties sections
+and popup box layouts are exercised. This validates drawing, not action execution or
+pixel-level equivalence to Blender's native panels.
+
+`test_modifier_layouts_live.py` is a **GUI** check: omit `--background`, use a disposable
+`--factory-startup` process. It draws all types through real UILayouts with sections
+open, including a custom bevel profile, chained Grease Pencil time segments and
+populated Geometry Nodes inputs. Inspect the console for RNA warnings as well as
+`$env:TEMP\mbt_modifier_layouts_live_result.txt`. Visual parity, operator execution,
+and conditional states beyond the fixtures still require manual testing.
+
+`generate_modifier_layouts.py` is an offline development generator, not a test.
+Run in disposable background Blender with `-- --source-dir` pointing to an absolute
+path containing the matching Blender source `MOD_*.cc` files, and `--output` pointing
+to the absolute path of `features/modifier_layout_data.py` in this checkout. The
+current data is pinned to Blender source commit `fbe6228777e7`. It extracts literal
+panel organization and widget hints, not C++ control flow; review runtime conditions
+and specialized helper handling whenever regenerating. No downloads occur at runtime.
+
+`test_concepting.py` checks all six projection directions, rotated/scaled/offset
+coordinates, corner-domain UV output, per-object active map selection without extra
+maps, no-UV fallback, base/other UV preservation, legacy group defaults, shared group reuse,
+repeat prevention, all-slot clay material assignment, Bevel shader wiring, material
+reuse, small bevel defaults and one-time stock-radius migration/custom preservation,
+unselected shared-mesh isolation (with and without existing slots), operator
+polls and registration cycles. Run in a disposable process with `--background
+--factory-startup --python-exit-code 1 --python` and its absolute script path.
+The sidebar section integration and live tests cover the new Concepting buttons.
+Actual texture appearance, bevel appearance and interactive Undo require a manual
+smoke test in the appropriate viewport shading mode.
+
+`test_modifier_search.py` also checks the Selected Settings default, active-only RNA
+drawing, selection/reorder/removal, empty stacks, Native Stack and missing-preferences
+fallbacks, and viewport popup isolation from the Properties preference.
+`test_modifier_search_live.py` performs three Native Stack → Selected Settings round
+trips in two Properties editors, checks pinned-object/tab/space preservation and the
+private empty template owner's lifecycle, then opens search and the viewport popup.
+Mode controls are preferences-only; background tests check their absence from the list
+and the search button's neutral unpressed style. Visual tone depends on theme.
+
+`test_modifier_search.py` checks compatible search enum lifetime, fixed toolbar
+layout, new-modifier selection, pinned-target handling, stale-target rejection,
+pinned-tail preservation, native settings dispatch, expansion and empty stacks.
+Run in a disposable process with `--background --factory-startup
+--python-exit-code 1 --python` and the absolute script path. The existing
+`test_registration.py` also checks the native expansion workflow.
+
+`test_modifier_search_live.py` checks real native Properties layouts without a
+settings toggle, floating search invocation and the viewport popup. Run in a disposable GUI
+process (omit `--background`) with `--factory-startup --python-exit-code 1 --python`
+and the absolute script path. It auto-quits; require `PASS` in the system-temp
+`mbt_modifier_search_live_result.txt`. Actual OS typing, result clicks and
+interactive undo/redo still require a manual smoke test.
+
+`test_runtime_health.py` checks read-only diagnostics, repair of active runtime
+timers/shortcuts, non-resurrection of external hidden panels and partial class/UV/
+Geometry Nodes registration rollback and retry. Injected tracebacks are expected.
+
+`test_sidebar_visibility_live.py` requires a disposable GUI process (omit
+`--background`). It observes the actual UI-region Panel instance, verifies owner
+preservation through apply/restore and File New, tests workspace owner exclusion
+and re-inclusion, and validates clipboard diagnostics. It auto-quits and writes
+system-temp `mbt_sidebar_visibility_result.json`; require `status: PASS`. Static
+RNA category enums return UNSUPPORTED in this Blender build, so the test records
+the live active category and actual panel drawing instead.
+
+`test_lifecycle_recovery.py` checks interrupted deferred enable, File New, repeated
+blend loads, intentional tab hiding, isolated teardown failures and third-party
+panel restoration failures. Run in a disposable process with `--factory-startup
+--python-exit-code 1 --python` and the absolute script path. Background mode checks
+load events synchronously; omitting `--background` also checks real event-loop
+initialization after File New, auto-quits and writes the system-temp file
+`mbt_lifecycle_recovery_result.txt`. Injected-failure tracebacks are expected.
+
+`test_generation_failures.py` checks mixed batches (curved solids, loose geometry,
+open surfaces), optional remesh, always-on resolution, named errors/counts and sparse
+work bounds independent of the empty bounding-box volume.
+It also checks a simulated 6.50-GiB estimate against configurable allowances and
+verifies subdivision does not change initial source-feature voxel selection.
+
+`test_resolution_policy.py` checks conservative complete seam welding, genuine
+openings, tiny sharp-edge hints, missing disconnected shells within global tolerance,
+and tighter local thin-wall acceptance constraints.
+
+`test_auto_generation.py` checks automatic always-remesh generation, scale-aware
+resolution, strict failure preservation, stable refresh, automatic collection/set
+registration, matching and Bake validation without selecting generated outputs.
+
+`test_dynabool.py` reproduces the old fine-voxel disappearance and checks repaired
+SDF extraction, manifoldness/bounds, thin and overlapping/disconnected solids,
+open-surface fallback/strict refusal, protected upgrades, save/reload, processor
+fingerprint migration, voxel budgets and rollback. Run in disposable background
+Blender with the arguments documented in [DYNABOOL.md](../DYNABOOL.md).
+
+`test_asset_tracking.py` checks explicit stage baselines, source/modifier/settings
+changes, protected working lows, shared UV dependencies, export/validation freshness,
+rename-stable collection identities, pinned-proposal and shared-low guards, preview
+selection restoration, reload and unknown legacy/versioned baselines. Requires a
+disposable background Blender; it exports only to a temporary directory, without Painter.
+
+`test_asset_uv.py` checks textured source/material and secondary-map preservation,
+UV locks and reviewed baselines, disposable proposals, stale/tampered proposal guards,
+preserved seams/protected edges, failure cleanup, shared-layout packing, Preserve /
+Automatic modes, read-only stage diagnostics, issue pointers and save/load/record
+cleanup. It requires a disposable background Blender, not Painter. Run with the same
+arguments as `test_registration.py` below. `test_painter_ui_live.py` also draws the
+expanded UV and Validation sections in a real Blender window.
+
 `test_painter_ui_parity.py` checks baking UI properties and operator actions,
 all seven map choices, narrow/wide layouts, busy-state gating, issue filters,
 unchanged defaults and side-effect-free drawing in disposable background Blender.
@@ -53,7 +213,7 @@ unchanged defaults and side-effect-free drawing in disposable background Blender
 sidebar-manager discovery, preserved section buttons, collision-safe collection
 names, role colors, and visibility controls for hidden/excluded collections.
 `test_painter_ui_parity.py` checks the complete workflow and original control order
-in Bake, empty Model/Export placeholders, and cancellation in Bake while busy.
+in Bake, Model asset actions, standalone Export controls, and cross-tab cancellation.
 Run in disposable background Blender.
 
 `test_painter_skew_fixtures.py` requires disposable background Blender, not
@@ -111,6 +271,8 @@ Use the same invocation with one of these scripts:
 | `test_painter_distances.py` | Automatic signed front/rear estimates, scene units, evaluated transforms/modifiers, set scoping, manual override and exported-geometry rebake consistency |
 | `test_painter_projection.py` | Pixel-space estimates, plane/box fixtures, transformed geometry, curvature/UV skips, state restoration and read-only capability gating |
 | `test_painter_workflow.py` | Grouping, matching, project reuse and workflow regressions |
+| `test_asset_processing.py` | Metadata-only asset CRUD/adoption, source preservation, UUID/pointer persistence, missing sources, Model UI, busy gating and lifecycle |
+| `test_asset_generation.py` | Real DynaBool/subdivision/SDF, preserved sources/lows/UVs, stable high refresh, edit/budget/failure guards, reversible previews, actual standalone FBX export, cleanup and save/reload |
 | `test_painter_texture_sets.py` | Shared default set, parent/child collections, per-set controls, real FBX material sharing, shared image import, rebake, persistence and legacy protection |
 | `test_painter_inputs.py` | Aggregated issues, popup actions, offset UV preservation, hidden/excluded collection restoration, many-to-many bake groups |
 | `test_painter_issues.py` | Individual/candidate/all selection, hidden mesh reveal, rename/delete/save/load identities, filters, safe UV face navigation, trailing roles, tiny/mirrored transforms, auto/manual provenance and inactive-set guards |

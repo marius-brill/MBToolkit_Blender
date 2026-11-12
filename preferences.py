@@ -63,8 +63,17 @@ def _modifier_hotkey_changed(self, context):
         rebuild_keymap()
 
 
+def _modifier_settings_changed(self, context):
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'PROPERTIES':
+                area.tag_redraw()
+
+
 def draw_modifier_preferences(layout, prefs):
     from .features.modifier_list import catalog, entry_key, CATEGORIES
+    layout.prop(prefs, 'modifier_settings_mode')
+    layout.label(text='Selected Settings uses native-style panels; Native Stack is Blender\'s complete UI.', icon='INFO')
     layout.label(text='Viewport modifier popup shortcut:')
     preferences_ui.draw_shortcut(layout, prefs)
     entries = {}
@@ -89,6 +98,31 @@ def draw_modifier_preferences(layout, prefs):
                 op.key, op.label, op.action = key, entry['label'], 'TOGGLE'
 
 
+class MBT_OT_retry_initialization(bpy.types.Operator):
+    bl_idname = 'mbt.retry_initialization'
+    bl_label = 'Retry Initialization'
+    bl_description = 'Retry enabled features without changing saved switches or hidden sidebar tabs'
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        feature_manager.schedule_sync(repair=True)
+        return {'FINISHED'}
+
+
+class MBT_OT_copy_diagnostics(bpy.types.Operator):
+    bl_idname = 'mbt.copy_diagnostics'
+    bl_label = 'Copy Lifecycle Diagnostics'
+    bl_description = 'Copy read-only initialization, panel, workspace and shortcut state for troubleshooting'
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        import json
+        from .core.diagnostics import snapshot
+        context.window_manager.clipboard = json.dumps(snapshot(context), indent=2)
+        self.report({'INFO'}, 'MBToolkit lifecycle diagnostics copied')
+        return {'FINISHED'}
+
+
 class MBT_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__  # root package = add-on id
 
@@ -104,6 +138,14 @@ class MBT_Preferences(bpy.types.AddonPreferences):
 
     pies: CollectionProperty(type=MBT_PieMenu)
     modifier_favorites: CollectionProperty(type=MBT_ModifierFavorite)
+    modifier_settings_mode: EnumProperty(
+        name='Modifier Settings',
+        description='Settings displayed below the modifier list in the Properties editor',
+        items=(('SELECTED', 'Selected Settings',
+                'Show only the selected modifier using native-style sections and specialized widgets'),
+               ('NATIVE', 'Native Stack',
+                'Show Blender\'s complete modifier stack with all specialized controls')),
+        default='SELECTED', update=_modifier_settings_changed)
     script_favorites: CollectionProperty(type=MBT_ScriptFavorite)
     script_favorite_index: IntProperty(default=0, min=0, options={'SKIP_SAVE'})
     n_panel_tabs: CollectionProperty(type=sidebar_data.MBT_NPanelTab)
@@ -146,6 +188,21 @@ class MBT_Preferences(bpy.types.AddonPreferences):
                 layout.prop(self, 'enable_' + key)
                 if feature_manager.error(key):
                     layout.label(text=feature_manager.error(key), icon='ERROR')
+                elif getattr(self, 'enable_' + key) and not feature_manager.is_enabled(key):
+                    layout.label(text='Waiting for initialization', icon='INFO')
+            layout.operator('mbt.retry_initialization', icon='FILE_REFRESH')
+            layout.operator('mbt.copy_diagnostics', icon='COPYDOWN')
+            workspace = getattr(context, 'workspace', None)
+            if workspace and workspace.use_filter_by_owner:
+                layout.label(text='Workspace add-on filtering is enabled', icon='INFO')
+                from .core.addon import ADDON_ID
+                if ADDON_ID not in workspace.owner_ids:
+                    layout.label(text='MBToolkit is excluded in this workspace', icon='ERROR')
+            if self.n_panel_enabled and feature_manager.is_enabled('n_panel'):
+                hidden = [item.name for item in self.n_panel_tabs
+                          if item.name in {'MBToolkit', 'MBT Baking', 'MBT Unreal'} and not item.visible]
+                for name in hidden:
+                    layout.label(text=f'{name} is hidden in N-Panel preferences', icon='INFO')
             layout.separator()
             layout.label(text='Changes apply immediately. Disabled features are skipped at startup.')
             layout.label(text='Save Preferences to retain these choices across restarts.')
@@ -199,7 +256,7 @@ for _key, _label, _default, _paths in feature_manager.FEATURES:
         description=f'Load {_label}; disabled features are skipped on the next startup')
 
 
-classes = (MBT_ModifierFavorite, MBT_ScriptFavorite, MBT_OT_modifier_favorite) + preferences_ui.classes + (sidebar_data.MBT_NPanelTab, MBT_Preferences)
+classes = (MBT_ModifierFavorite, MBT_ScriptFavorite, MBT_OT_modifier_favorite, MBT_OT_retry_initialization, MBT_OT_copy_diagnostics) + preferences_ui.classes + (sidebar_data.MBT_NPanelTab, MBT_Preferences)
 
 
 def register():

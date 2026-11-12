@@ -1,11 +1,12 @@
 """Preferences-only management of Python-defined 3D View sidebar categories."""
 
 import bpy
+import traceback
 from bpy.props import BoolProperty, EnumProperty, IntProperty
 
 from ..core.addon import get_prefs
 from ..core.sidebar_data import MBT_NPanelTab
-from ..core.registry import register_classes, unregister_classes
+from ..core.registry import register_classes, unregister_classes, registration_owner
 
 
 _originals = {}
@@ -109,9 +110,22 @@ def _set_attribute(cls, name, value):
 
 
 def _restore_attributes():
+    errors = []
     for cls, original in _originals.items():
-        _set_attribute(cls, 'poll', original['poll'])
-        _set_attribute(cls, 'bl_order', original['order'])
+        for name, value in (('poll', original['poll']), ('bl_order', original['order'])):
+            try:
+                _set_attribute(cls, name, value)
+            except Exception as exc:
+                errors.append(f'{panel_id(cls)}.{name}: {exc}')
+    if errors:
+        raise RuntimeError('; '.join(errors))
+
+
+def _register_panel(cls):
+    # Preserve explicit ownership; infer implicit ownership from the enabled
+    # defining package, not whichever add-on happened to run the timer.
+    with registration_owner(cls.__module__, getattr(cls, 'bl_owner_id', None)):
+        bpy.utils.register_class(cls)
 
 
 def _visible_poll(category, original):
@@ -132,13 +146,56 @@ def redraw():
                 area.tag_redraw()
 
 
+def _affected(panels, managed):
+    """Only rebuild managed roots and their registered descendants; leave Item alone."""
+    ids = {panel_id(cls) for cls in managed}
+    selected = set(managed)
+    for cls in ordered_classes(panels):
+        if getattr(cls, 'bl_parent_id', '') in ids:
+            selected.add(cls)
+            ids.add(panel_id(cls))
+    return ordered_classes(sorted((cls for cls in panels if cls in selected), key=_original_order))
+
+
+def _rebuild(ordered, configure):
+    """Recover every removed class independently if a third-party class fails."""
+    removed = []
+    try:
+        for cls in reversed(ordered):
+            bpy.utils.unregister_class(cls)
+            removed.append(cls)
+        configure()
+        for cls in ordered:
+            _register_panel(cls)
+    except Exception as exc:
+        errors = []
+        for cls in reversed(ordered):
+            if cls in removed and cls.is_registered:
+                try:
+                    bpy.utils.unregister_class(cls)
+                except Exception as cleanup_exc:
+                    errors.append(f'{panel_id(cls)}: {cleanup_exc}')
+        try:
+            _restore_attributes()
+        except Exception as attributes_exc:
+            errors.append(str(attributes_exc))
+        for cls in ordered:
+            if cls in removed and not cls.is_registered:
+                try:
+                    _register_panel(cls)
+                except Exception as recovery_exc:
+                    errors.append(f'{panel_id(cls)}: {recovery_exc}')
+        detail = '; recovery failures: ' + '; '.join(errors) if errors else ''
+        raise RuntimeError(f'{exc}{detail}') from exc
+
+
 def apply(prefs):
     """Rebuild registered panel types, with rollback if a third-party panel fails."""
     global _signature, _error
     panels = refresh(prefs)
-    ordered = ordered_classes(sorted(panels, key=_original_order))
     # Capture only roots: descendants keep their own ordering and poll methods.
     managed = [cls for cls in roots(panels) if cls.bl_category != 'Item']
+    ordered = _affected(panels, managed)
     for cls in managed:
         if cls not in _originals:
             _originals[cls] = {
@@ -147,26 +204,16 @@ def apply(prefs):
                 'bound_poll': _original_poll(cls),
             }
     # No API is used to reach native PanelType memory; native Item stays first.
-    try:
-        for cls in reversed(ordered):
-            bpy.utils.unregister_class(cls)
+    def configure():
         _restore_attributes()
         if prefs.n_panel_enabled:
             rank = {item.name: i for i, item in enumerate(prefs.n_panel_tabs)}
             for cls in managed:
                 cls.bl_order = rank[cls.bl_category]
                 cls.poll = _visible_poll(cls.bl_category, _originals[cls]['bound_poll'])
-        for cls in ordered:
-            bpy.utils.register_class(cls)
+    try:
+        _rebuild(ordered, configure)
     except Exception as exc:
-        # A failed registration must not leave another add-on's panels missing.
-        for cls in reversed(ordered):
-            if cls.is_registered:
-                bpy.utils.unregister_class(cls)
-        _restore_attributes()
-        for cls in ordered:
-            bpy.utils.register_class(cls)
-        _originals.clear()
         _error = f'Tab manager stopped: {exc}'
         prefs.n_panel_enabled = False
         raise
@@ -181,12 +228,9 @@ def restore():
     """Only re-register classes still enabled; never revive a disabled add-on."""
     global _signature
     if _originals:
-        panels = ordered_classes(sorted(panel_classes(), key=_original_order))
-        for cls in reversed(panels):
-            bpy.utils.unregister_class(cls)
-        _restore_attributes()
-        for cls in panels:
-            bpy.utils.register_class(cls)
+        panels = panel_classes()
+        ordered = _affected(panels, [cls for cls in panels if cls in _originals])
+        _rebuild(ordered, _restore_attributes)
         _originals.clear()
     _signature = None
     redraw()
@@ -218,6 +262,7 @@ def _tick():
             refresh(prefs)
     except Exception as exc:
         _error = f'Tab manager: {exc}'
+        traceback.print_exc()
         print(_error)
     return 1.0
 

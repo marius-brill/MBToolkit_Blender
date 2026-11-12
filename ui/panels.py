@@ -81,7 +81,8 @@ def draw_section(layout, context, key):
         if index:
             body.separator()
         if key == 'tools':
-            body.label(text='Incremental Rename' if index == 0 else 'Clean Up')
+            body.label(text={'rename': 'Incremental Rename', 'clean_up': 'Clean Up',
+                             'concepting': 'Concepting'}[path])
         module = import_module(f'{ADDON_ID}.features.{path}')
         module.draw(body, context)
 

@@ -10,9 +10,18 @@ draw = ui.draw
 
 def register():
     register_classes(classes)
-    runtime.register()
+    try:
+        runtime.register()
+    except Exception:
+        try:
+            runtime.unregister()
+        finally:
+            unregister_classes(classes)
+        raise
 
 
 def unregister():
-    runtime.unregister()
-    unregister_classes(classes)
+    try:
+        runtime.unregister()
+    finally:
+        unregister_classes(classes)

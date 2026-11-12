@@ -250,6 +250,7 @@ def modifier_list_cases():
         column = row
         box = row
         column_flow = row
+        split = row
 
         def template_modifier_asset_menu_items(self, **kwargs):
             pass
@@ -429,6 +430,7 @@ def modifier_workflow_cases():
         column = row
         column_flow = row
         box = row
+        split = row
         def label(self, **kwargs):
             pass
         def operator(self, idname, **kwargs):
@@ -472,10 +474,11 @@ def modifier_editor_cases():
         def row(self, **kwargs):
             return self
         box = row
+        column = row
         def label(self, **kwargs):
             pass
         def context_pointer_set(self, name, value):
-            assert name == 'modifier' and value == obj.modifiers.active
+            assert name in {'modifier', 'mbt_modifier_settings'} and value == obj.modifiers.active
         def prop(self, data, name, **kwargs):
             assert name in data.bl_rna.properties or name.startswith('["')
             self.props.append((data, name))
@@ -484,6 +487,16 @@ def modifier_editor_cases():
             return SimpleNamespace()
         def template_curve_mapping(self, data, name):
             assert isinstance(getattr(data, name), bpy.types.CurveMapping)
+        def template_curveprofile(self, data, name):
+            assert isinstance(getattr(data, name), bpy.types.CurveProfile)
+        def template_color_ramp(self, data, name, **kwargs):
+            assert isinstance(getattr(data, name), bpy.types.ColorRamp)
+        def template_ID(self, data, name, **kwargs):
+            assert name in data.bl_rna.properties
+        def prop_search(self, data, name, owner, collection, **kwargs):
+            self.prop(data, name, **kwargs)
+        def template_list(self, *args, **kwargs):
+            pass
 
     layout = Layout()
     feature.draw_active_settings(layout, bpy.context)
@@ -620,6 +633,7 @@ def modifier_editor_cases():
     feature.draw = lambda layout, context: calls.append('list')
     try:
         feature._draw_native(SimpleNamespace(layout=SimpleNamespace(
+            row=lambda **kwargs: SimpleNamespace(prop=lambda *args, **kwargs: None),
             template_modifiers=lambda: calls.append('native'))), bpy.context)
     finally:
         feature.draw = original_draw

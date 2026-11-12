@@ -1,15 +1,14 @@
 """Automation-first UV suite; original implementation, no vendored sources."""
 from . import settings, operators
+from ...core.registry import register_modules, unregister_modules
 
 
 def register():
-    settings.register()
-    operators.register()
+    register_modules((settings, operators))
 
 
 def unregister():
-    operators.unregister()
-    settings.unregister()
+    unregister_modules((settings, operators))
 
 
 def section(layout, settings, property_name):

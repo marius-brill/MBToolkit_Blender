@@ -88,12 +88,16 @@ def main():
                         tab_records = []
                         painter.draw(Layout(tab_records), context)
                         assert ('prop', 'ui_tab', True) in tab_records
-                        if tab != 'BAKE':
-                            assert tab_records == [('prop', 'ui_tab', True)], tab_records
-                        if busy and tab == 'BAKE':
+                        if tab == 'MODEL':
+                            assert any(r[0] == 'operator' and r[1] == 'mbt.asset_edit'
+                                       and r[3] == (not busy) for r in tab_records)
+                        if tab == 'EXPORT':
+                            assert any(r[0] == 'operator' and r[1] == 'mbt.asset_process' for r in tab_records)
+                        if busy:
                             assert any(r[0] == 'operator' and r[1] == 'mbt.painter_cancel'
                                        and r[3] for r in tab_records), tab
-                        records.extend(tab_records)
+                        if tab == 'BAKE':
+                            records.extend(tab_records)
                 # Preserve the pre-split workflow in Bake, not merely across tabs.
                 order = [('prop', 'texture_collection'), ('prop', 'low_collection'),
                          ('prop', 'high_collection'), ('prop', 'project_name'),
@@ -148,7 +152,7 @@ def main():
         records = []
         issues.MBT_UL_painter_issues.draw_filter(SimpleNamespace(filter_name=''), bpy.context, Layout(records))
         assert ('prop', 'issue_blocking_only', True) in records
-        print('PASS: Bake-only workflow in original order, empty Model/Export tabs, narrow/wide, busy/idle, all controls/actions, filters and side-effect-free drawing')
+        print('PASS: unchanged Bake order, Model records, cross-tab cancellation, narrow/wide, busy/idle, all controls/actions, filters and side-effect-free drawing')
     finally:
         addon.unregister()
 

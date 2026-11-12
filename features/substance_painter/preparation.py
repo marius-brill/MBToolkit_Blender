@@ -40,7 +40,7 @@ def signature(context):
     values = []
     for prop in settings.bl_rna.properties:
         key = prop.identifier
-        if key in {'rna_type', 'report', 'matching_report', 'advanced', 'bake_settings', 'preparation_timings',
+        if key in {'rna_type', 'ui_tab', 'report', 'matching_report', 'advanced', 'bake_settings', 'preparation_timings',
                     'issue_rows', 'issue_index', 'issue_blocking_only', 'projection_report'}:
             continue
         value = getattr(settings, key)

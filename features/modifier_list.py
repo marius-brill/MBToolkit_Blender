@@ -1,4 +1,4 @@
-"""Native Modifier Properties, favorites, overview and bottom-relative pins."""
+"""Modifier list, selected/native settings, favorites and bottom-relative pins."""
 
 from types import SimpleNamespace
 from functools import lru_cache
@@ -17,9 +17,11 @@ SUPPORTED_TYPES = {'MESH', 'CURVE', 'CURVES', 'FONT', 'SURFACE', 'LATTICE',
 CATEGORIES = ('Edit', 'Generate', 'Deform', 'Normals', 'Physics', 'Color')
 _native_draw = None
 _native_panel = None
+_empty_panel_owner = None
 _busy = False
 _blocked = set()
 _keymap_items = []
+_settings_keymap_items = []
 _expanded_selection = {}
 _modifier_timings = {}
 
@@ -246,6 +248,8 @@ def _reset_locks(*args):
     if not bpy.app.timers.is_registered(_init_timings):
         bpy.app.timers.register(_init_timings, first_interval=0.05)
     _stack_changed()
+    if not bpy.app.timers.is_registered(_init_keymap):
+        bpy.app.timers.register(_init_keymap, first_interval=0.2, persistent=True)
 
 
 class _Catalog:
@@ -297,6 +301,68 @@ def entry_key(entry):
     return entry['operator'] + ':' + str(entry['args'].get('type', entry['args'].get('relative_asset_identifier', '')))
 
 
+@lru_cache(maxsize=None)
+def _modifier_search_items(obj_type):
+    # Keep dynamic enum strings alive for Blender, just like the pie action picker.
+    return [(entry_key(entry), entry['label'] + '  ·  ' + entry['category'],
+             'Add ' + entry['label'], entry['icon'], index)
+            for index, entry in enumerate(sorted(catalog(obj_type),
+                                                key=lambda entry: entry['label'].casefold()))]
+
+
+def _modifier_search_choices(self, context):
+    obj = (bpy.data.objects.get(self.object_name) if self.object_name
+           else getattr(context, 'object', None))
+    return _modifier_search_items(obj.type) if obj is not None else []
+
+
+class MBT_OT_modifier_search(bpy.types.Operator):
+    bl_idname = 'mbt.modifier_search'
+    bl_label = 'Search Modifiers'
+    bl_description = 'Search compatible modifiers in a floating popup without moving the stack'
+    bl_property = 'choice'
+
+    choice: EnumProperty(items=_modifier_search_choices)
+    object_name: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    object_uid: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        return (_editable(obj) and obj.type in SUPPORTED_TYPES and obj.mode == 'OBJECT')
+
+    def invoke(self, context, event):
+        obj = bpy.data.objects.get(self.object_name) if self.object_name else context.object
+        if (not _editable(obj) or obj.type not in SUPPORTED_TYPES or obj.mode != 'OBJECT'
+                or obj.name not in context.view_layer.objects):
+            return {'CANCELLED'}
+        self.object_name = obj.name
+        self.object_uid = str(obj.session_uid)
+        context.window_manager.invoke_search_popup(self)
+        return {'RUNNING_MODAL'}
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(self.object_name)
+        if obj is None or (self.object_uid and str(obj.session_uid) != self.object_uid):
+            self.report({'WARNING'}, 'Search target is no longer available')
+            return {'CANCELLED'}
+        if not self.choice:
+            return {'CANCELLED'}
+        return bpy.ops.mbt.modifier_add('EXEC_DEFAULT', key=self.choice, object_name=obj.name)
+
+
+def draw_add_search(layout, context, obj):
+    row = layout.split(factor=2 / 3, align=True)
+    search = row.row(align=True)
+    search.enabled = _editable(obj) and obj.type in SUPPORTED_TYPES and obj.mode == 'OBJECT'
+    search.operator_context = 'INVOKE_DEFAULT'
+    op = search.operator('mbt.modifier_search', text='Search modifiers…', icon='VIEWZOOM', depress=False)
+    op.object_name = getattr(obj, 'name', '')
+    button = row.row(align=True)
+    button.operator_context = 'INVOKE_DEFAULT'
+    button.operator('mbt.modifier_add_menu', text='Add', icon='ADD')
+
+
 def _add_button(layout, entry, obj, text=None):
     op = layout.operator('mbt.modifier_add', text=entry['label'] if text is None else text,
                          icon=entry['icon'])
@@ -321,11 +387,18 @@ class MBT_OT_modifier_add(bpy.types.Operator):
             self.report({'WARNING'}, 'Modifier is unavailable for this object')
             return {'CANCELLED'}
         try:
+            previous = {modifier.persistent_uid for modifier in obj.modifiers}
             with context.temp_override(object=obj, active_object=obj, selected_objects=[obj],
                                        selected_editable_objects=[obj]):
                 op = bpy.ops.object.modifier_add if entry['operator'] == 'object.modifier_add' else bpy.ops.object.modifier_add_node_group
                 result = op('EXEC_DEFAULT', **entry['args'])
             enforce_locks(obj)
+            if 'FINISHED' in result:
+                added = next((modifier for modifier in reversed(obj.modifiers)
+                              if modifier.persistent_uid not in previous), None)
+                if added is not None:
+                    obj.modifiers.active = added
+                    _sync_expanded_selection(obj)
             return result
         except (RuntimeError, TypeError, ValueError) as exc:
             self.report({'WARNING'}, str(exc))
@@ -469,38 +542,204 @@ def favorite_rows(favorites):
         yield favorites[start:start + 4]
 
 
+def _settings_target(context):
+    modifier = getattr(context, 'mbt_modifier_settings', None)
+    if modifier is None:
+        # Keyboard keymaps do not inherit a hovered button's layout context.
+        # Blender does expose the RNA property under the pointer, including
+        # nested Geometry Nodes input values, via context.property.
+        hovered = getattr(context, 'property', None)
+        if not hovered:
+            return None, None
+        data, prop, _index = hovered
+        # context.property returns (ID owner, RNA path string, index), rather
+        # than the nested struct and PropertyRNA used by Blender internally.
+        if isinstance(prop, str):
+            if not isinstance(data, bpy.types.Object) or '.' not in prop:
+                return None, None
+            owner_path, field = prop.rsplit('.', 1)
+            try:
+                data = data.path_resolve(owner_path)
+            except (ValueError, TypeError, AttributeError):
+                return None, None
+            prop = data.bl_rna.properties.get(field)
+            if prop is None:
+                return None, None
+        obj = getattr(data, 'id_data', None)
+        if not isinstance(obj, bpy.types.Object):
+            return None, None
+        if isinstance(data, bpy.types.Modifier):
+            # Exclude list controls such as name and visibility toggles.
+            if prop.identifier in bpy.types.Modifier.bl_rna.properties:
+                return None, None
+            modifier = data
+        else:
+            try:
+                path = data.path_from_id()
+            except (ValueError, TypeError):
+                return None, None
+            modifier = next((m for m in obj.modifiers
+                             if path.startswith(m.path_from_id() + '.')), None)
+            if modifier is None:
+                return None, None
+    obj = modifier.id_data
+    if not isinstance(obj, bpy.types.Object) or modifier not in obj.modifiers.values():
+        return None, None
+    return obj, modifier
+
+
+class MBT_OT_modifier_section(bpy.types.Operator):
+    bl_idname = 'mbt.modifier_section'
+    bl_label = 'Expand or Collapse Modifier Section'
+    bl_options = {'INTERNAL'}
+
+    key: StringProperty()
+    object_name: StringProperty()
+    object_uid: StringProperty()
+    uid: IntProperty()
+    state: StringProperty()
+    opened: BoolProperty()
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(self.object_name)
+        if obj is None or str(obj.session_uid) != self.object_uid:
+            return {'CANCELLED'}
+        md = next((m for m in obj.modifiers if m.persistent_uid == self.uid), None)
+        if md is None:
+            return {'CANCELLED'}
+        from .modifier_layouts import _section_open
+        if self.state and self.state in md.bl_rna.properties:
+            if not obj.is_editable:
+                return {'CANCELLED'}
+            setattr(md, self.state, not self.opened)
+        else:
+            _section_open[self.key] = not self.opened
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type in {'PROPERTIES', 'VIEW_3D'}:
+                    area.tag_redraw()
+        return {'FINISHED'}
+
+
+class MBT_OT_modifier_action(bpy.types.Operator):
+    bl_idname = 'mbt.modifier_action'
+    bl_label = 'Modifier Action'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    action: EnumProperty(items=(('APPLY', 'Apply', 'Apply this modifier to the object'),
+                               ('DUPLICATE', 'Duplicate', 'Duplicate this modifier'),
+                               ('COPY', 'Copy to Selected', 'Copy this modifier to the other selected objects')))
+    object_name: StringProperty(options={'HIDDEN'})
+    object_uid: StringProperty(options={'HIDDEN'})
+    uid: IntProperty(options={'HIDDEN'})
+
+    @classmethod
+    def description(cls, context, properties):
+        return {'APPLY': 'Apply this modifier (Ctrl+A over its settings)',
+                'DUPLICATE': 'Duplicate this modifier',
+                'COPY': 'Copy this modifier to the other selected objects'}.get(properties.action, 'Modifier action')
+
+    def execute(self, context):
+        obj = bpy.data.objects.get(self.object_name)
+        if obj is None or str(obj.session_uid) != self.object_uid or not _editable(obj) or obj.mode != 'OBJECT':
+            self.report({'WARNING'}, 'Modifier target is unavailable or not editable in Object Mode')
+            return {'CANCELLED'}
+        modifier = next((m for m in obj.modifiers if m.persistent_uid == self.uid), None)
+        if modifier is None:
+            self.report({'WARNING'}, 'Modifier is no longer available')
+            return {'CANCELLED'}
+        targets = [o for o in context.selected_objects if o != obj and _editable(o) and o.mode == 'OBJECT']
+        if self.action == 'COPY' and not targets:
+            self.report({'WARNING'}, 'Select another editable object to receive this modifier')
+            return {'CANCELLED'}
+        try:
+            before = {m.persistent_uid for m in obj.modifiers}
+            selected = [obj] + targets if self.action == 'COPY' else [obj]
+            with context.temp_override(object=obj, active_object=obj, selected_objects=selected,
+                                       selected_editable_objects=selected):
+                if self.action == 'APPLY':
+                    result = bpy.ops.object.modifier_apply(modifier=modifier.name, use_selected_objects=False)
+                elif self.action == 'DUPLICATE':
+                    result = bpy.ops.object.modifier_copy(modifier=modifier.name, use_selected_objects=False)
+                else:
+                    result = bpy.ops.object.modifier_copy_to_selected(modifier=modifier.name)
+            if result == {'FINISHED'}:
+                if self.action == 'DUPLICATE':
+                    added = next((m for m in obj.modifiers if m.persistent_uid not in before), None)
+                    if added is not None:
+                        obj.modifiers.active = added
+                enforce_locks(obj)
+                _sync_expanded_selection(obj)
+                for window in context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type in {'PROPERTIES', 'VIEW_3D'}:
+                            area.tag_redraw()
+            return result
+        except (RuntimeError, TypeError, ValueError) as exc:
+            self.report({'WARNING'}, str(exc))
+            return {'CANCELLED'}
+
+
+class MBT_OT_modifier_apply_hovered(bpy.types.Operator):
+    bl_idname = 'mbt.modifier_apply_hovered'
+    bl_label = 'Apply Modifier Under Cursor'
+    bl_description = 'Apply the modifier whose selected settings are under the cursor'
+    bl_options = {'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        prefs = get_prefs(context)
+        if (context.area is None or context.area.type != 'PROPERTIES'
+                or context.region is None or context.region.type != 'WINDOW'
+                or context.space_data.context != 'MODIFIER'
+                or prefs is None or prefs.modifier_settings_mode != 'SELECTED'):
+            return False
+        obj, modifier = _settings_target(context)
+        return modifier is not None and _editable(obj) and obj.mode == 'OBJECT'
+
+    def execute(self, context):
+        obj, modifier = _settings_target(context)
+        if modifier is None:
+            return {'PASS_THROUGH'}
+        return bpy.ops.mbt.modifier_action(action='APPLY', object_name=obj.name,
+                                           object_uid=str(obj.session_uid), uid=modifier.persistent_uid)
+
+
+def draw_settings_header(layout, context, modifier):
+    obj = modifier.id_data
+    layout.context_pointer_set('mbt_modifier_settings', modifier)
+    row = layout.row(align=True)
+    row.label(text=modifier.name)
+    buttons = row.row(align=True)
+    buttons.alignment = 'RIGHT'
+    buttons.scale_x = 1.7
+    buttons.scale_y = 1.7
+    buttons.enabled = _editable(obj) and obj.mode == 'OBJECT'
+    for action, icon in (('APPLY', 'CHECKMARK'), ('DUPLICATE', 'DUPLICATE'), ('COPY', 'COPYDOWN')):
+        sub = buttons.row(align=True)
+        if action == 'COPY':
+            sub.enabled = any(o != obj and _editable(o) and o.mode == 'OBJECT' for o in context.selected_objects)
+        op = sub.operator('mbt.modifier_action', text='', icon=icon)
+        op.action, op.object_name, op.object_uid, op.uid = action, obj.name, str(obj.session_uid), modifier.persistent_uid
+    # Match the list body's right edge, excluding its move-arrow column.
+    # Keep this outside the scaled button row so the inset stays one UI unit.
+    gutter = row.row(align=True)
+    gutter.ui_units_x = 1.0
+    gutter.label(text='')
+
+
 def draw_active_settings(layout, context):
     obj = context.object
     modifier = obj.modifiers.active if obj is not None else None
     if modifier is None:
         return
+    from .modifier_layouts import draw as draw_settings
+    # Both views use the same disclosure renderer, so the complete selected
+    # settings (including its action header) can live inside one themed card.
+    popup = context.area is None or context.area.type != 'PROPERTIES'
     box = layout.box()
-    box.context_pointer_set('modifier', modifier)
-    box.label(text=modifier.name, icon=modifier_icon(modifier))
-    box.enabled = _editable(obj)
-    box.use_property_split = True
-    box.use_property_decorate = True
-    _draw_property(box, obj, modifier, 'use_pin_to_last', text='Pin to Last')
-    # Native modifier panels are C-defined and template_modifiers draws the
-    # entire stack. RNA provides a supported, shared single-modifier editor.
-    hidden = set(bpy.types.Modifier.bl_rna.properties.keys())
-    for prop in modifier.bl_rna.properties:
-        name = prop.identifier
-        if modifier.type == 'NODES' and name == 'properties':
-            continue  # Dynamic inputs have a dedicated, type-aware drawer.
-        if name in hidden or prop.is_hidden or prop.is_readonly or prop.type == 'COLLECTION':
-            continue
-        if prop.type == 'POINTER' and getattr(modifier, name, None) is not None:
-            value = getattr(modifier, name)
-            if not isinstance(value, bpy.types.ID):
-                if isinstance(value, bpy.types.CurveMapping):
-                    box.template_curve_mapping(modifier, name)
-                else:
-                    _draw_embedded_settings(box, value, prop.name)
-                continue
-        box.prop(modifier, name)
-    if modifier.type == 'NODES':
-        _draw_node_inputs(box, modifier)
+    box.context_pointer_set('mbt_modifier_settings', modifier)
+    draw_settings(box, context, modifier, popup=popup)
 
 
 def _draw_embedded_settings(layout, settings, label):
@@ -626,10 +865,11 @@ def draw(layout, context):
                 else:
                     sub.label(text=favorite.label, icon='MODIFIER')
     row.operator('mbt.open_prefs', text='', icon='PREFERENCES')
-    layout.operator_context = 'INVOKE_DEFAULT'
-    layout.operator('mbt.modifier_add_menu', icon='ADD')
+    draw_add_search(layout, context, obj)
     stack = layout.row()
-    stack.template_list('MBT_UL_modifiers', '', obj, 'modifiers', obj, INDEX_PROPERTY, rows=4)
+    rows = max(4, min(8, len(obj.modifiers)))
+    stack.template_list('MBT_UL_modifiers', '', obj, 'modifiers', obj, INDEX_PROPERTY,
+                        rows=rows, maxrows=rows)
     controls = stack.column(align=True)
     active = obj.modifiers.active
     locked = {p.uid for p in obj.mbt_modifier_locks} | {m.persistent_uid for m in obj.modifiers if m.use_pin_to_last}
@@ -645,9 +885,36 @@ def draw(layout, context):
         layout.label(text='Position lock conflicts with native stack restrictions', icon='ERROR')
 
 
+def _clear_native_panels(layout, context):
+    """Let Blender reconcile its instanced panel list against an empty stack.
+
+    The zero-user owner is not linked to a scene and has no geometry. It is
+    lazily recreated after loads/undo and removed on feature teardown.
+    """
+    global _empty_panel_owner
+    if bpy.app.background or context.area is None or context.area.type != 'PROPERTIES':
+        return
+    try:
+        valid = _empty_panel_owner is not None and _empty_panel_owner.name in bpy.data.objects
+    except ReferenceError:
+        valid = False
+    if not valid:
+        _empty_panel_owner = bpy.data.objects.new('.MBToolkit Empty Modifier UI', None)
+    with context.temp_override(object=_empty_panel_owner, active_object=_empty_panel_owner):
+        layout.template_modifiers()
+
+
 def _draw_native(self, context):
     draw(self.layout, context)
-    self.layout.template_modifiers()
+    prefs = get_prefs(context)
+    if prefs is not None and prefs.modifier_settings_mode == 'SELECTED':
+        _clear_native_panels(self.layout, context)
+        # Shared with the popup; versioned native-style panel descriptions.
+        draw_active_settings(self.layout, context)
+    else:
+        # Keep every specialized native control available, including at startup
+        # before preferences exist. Never alter the stack to filter native panels.
+        self.layout.template_modifiers()
 
 
 class MBT_OT_modifier_popup(bpy.types.Operator):
@@ -672,13 +939,27 @@ class MBT_OT_modifier_popup(bpy.types.Operator):
 
 
 def rebuild_keymap():
+    for km, item in _settings_keymap_items:
+        try:
+            km.keymap_items.remove(item)
+        except (ReferenceError, RuntimeError):
+            pass
+    _settings_keymap_items.clear()
     for km, item in _keymap_items:
-        km.keymap_items.remove(item)
+        try:
+            km.keymap_items.remove(item)
+        except (ReferenceError, RuntimeError):
+            pass
     _keymap_items.clear()
     prefs = get_prefs()
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon if wm is not None else None
-    if kc is None or prefs is None or prefs.modifier_popup_key == 'NONE':
+    if kc is None or prefs is None:
+        return
+    km = kc.keymaps.new(name='Property Editor', space_type='PROPERTIES')
+    item = km.keymap_items.new('mbt.modifier_apply_hovered', 'A', 'PRESS', ctrl=True)
+    _settings_keymap_items.append((km, item))
+    if prefs.modifier_popup_key == 'NONE':
         return
     km = kc.keymaps.new(name='3D View', space_type='VIEW_3D')
     item = km.keymap_items.new('mbt.modifier_popup', prefs.modifier_popup_key, 'PRESS',
@@ -688,13 +969,20 @@ def rebuild_keymap():
 
 
 def _init_keymap():
+    if _native_panel is None:
+        return None
+    if get_prefs() is None or bpy.context.window_manager is None:
+        return 0.2
+    if not bpy.app.background and bpy.context.window_manager.keyconfigs.addon is None:
+        return 0.2
     rebuild_keymap()
     return None
 
 
-classes = (MBT_ModifierLock, MBT_UL_modifiers, MBT_OT_modifier_add,
+classes = (MBT_ModifierLock, MBT_UL_modifiers, MBT_OT_modifier_add, MBT_OT_modifier_search,
            MBT_MT_modifier_overview, MBT_OT_modifier_add_menu, MBT_OT_modifier_lock, MBT_OT_modifier_manage,
-           MBT_OT_modifier_popup, MBT_OT_modifier_viewport_toggle, MBT_OT_modifier_render_toggle)
+           MBT_OT_modifier_popup, MBT_OT_modifier_viewport_toggle, MBT_OT_modifier_render_toggle,
+           MBT_OT_modifier_action, MBT_OT_modifier_apply_hovered, MBT_OT_modifier_section)
 
 
 def register():
@@ -712,18 +1000,36 @@ def register():
     for handlers in (bpy.app.handlers.load_post, bpy.app.handlers.undo_post, bpy.app.handlers.redo_post):
         handlers.append(_reset_locks)
     _stack_changed()
-    bpy.app.timers.register(_init_keymap, first_interval=0.2)
+    if not bpy.app.timers.is_registered(_init_keymap):
+        bpy.app.timers.register(_init_keymap, first_interval=0.2, persistent=True)
     bpy.app.timers.register(_init_timings, first_interval=0.05)
 
 
 def unregister():
-    global _native_panel, _native_draw
+    global _native_panel, _native_draw, _empty_panel_owner
+    from .modifier_layouts import _section_open
+    _section_open.clear()
+    for km, item in _settings_keymap_items:
+        try:
+            km.keymap_items.remove(item)
+        except (ReferenceError, RuntimeError):
+            pass
+    _settings_keymap_items.clear()
+    try:
+        if _empty_panel_owner is not None:
+            bpy.data.objects.remove(_empty_panel_owner)
+    except ReferenceError:
+        pass
+    _empty_panel_owner = None
     if bpy.app.timers.is_registered(_init_keymap):
         bpy.app.timers.unregister(_init_keymap)
     if bpy.app.timers.is_registered(_init_timings):
         bpy.app.timers.unregister(_init_timings)
     for km, item in _keymap_items:
-        km.keymap_items.remove(item)
+        try:
+            km.keymap_items.remove(item)
+        except (ReferenceError, RuntimeError):
+            pass
     _keymap_items.clear()
     if _native_panel is not None and _native_panel.draw is _draw_native:
         _native_panel.draw = _native_draw
@@ -741,6 +1047,7 @@ def unregister():
     _blocked.clear()
     _expanded_selection.clear()
     _modifier_timings.clear()
+    _modifier_search_items.cache_clear()
     catalog.cache_clear()
     del bpy.types.Object.mbt_modifier_locks
     del bpy.types.Object.mbt_modifier_index

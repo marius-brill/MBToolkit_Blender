@@ -2,12 +2,26 @@
 
 Hard surface workflow toolkit for Blender 5.2+
 
+For DynaBool fine-voxel fixes, existing-modifier upgrades and remeshing limits, see
+[Automatic DynaBool and Model to Bake](AUTO_REMESH.md).
+
 ## Requirements
 
 - Blender **5.2 or newer**. Earlier Blender versions are not supported.
 - No pip packages are required; the add-on uses Blender's Python and its standard library.
+- The optional **Blender to Unreal Bridge** adds an **MBT Unreal** N-panel:
+  send selected Empty hierarchies as named Static Mesh assets to a chosen project
+  and Content folder using project Interchange defaults. Requires UE 5.7+;
+  see [Unreal bridge setup and limitations](UNREAL_BRIDGE.md).
 - Substance Painter is optional and only needed for the Painter bridge/baking feature.
   See [Painter setup and limitations](SUBSTANCE_PAINTER.md) before enabling it.
+  The same MBT Baking panel provides source-preserving asset records, DynaBool
+  generation/custom highs and standalone FBX export without launching Painter.
+  Model also offers protected Preserve / Assisted / Automatic UV preparation and
+  stage-aware geometry/UV/export diagnostics. Assisted UVs use disposable proposals;
+  applying requires explicitly unlocked derived lows. Existing UV tools remain available.
+  **Check Outdated** reports explicit dependency snapshots without reprocessing;
+  existing working lows are never refreshed automatically.
 - Windows is the primary development environment. Other platforms need validation,
   particularly Painter executable selection and launch behavior.
 
@@ -29,8 +43,78 @@ duplicate copies can register conflicting operators, panels, and shortcuts.
 To uninstall, disable/remove MBToolkit in Add-ons preferences. Exported Painter
 projects and textures are not removed by uninstalling the add-on.
 
+## Modifier list and selected settings
+
+With **Modifier Tools** enabled, the Modifiers tab in Properties shows MBToolkit's
+list and settings for the selected row. Switch between **Selected Settings** and
+**Native Stack** in the add-on's **Modifiers** preferences; the list has no display-mode buttons.
+Save Preferences to retain the choice across restarts.
+
+The selected modifier's header has icon-only **Apply**, **Duplicate**, and **Copy to
+Selected** actions with hover tooltips. In Selected Settings, press **Ctrl+A** while
+hovering a modifier settings control in Properties to apply its modifier. Blank
+space, the modifier list, other tabs and the viewport are not shortcut targets.
+Text editing retains Blender's normal event handling. Actions use Blender's native
+operators and restrictions; Copy to Selected requires another editable selected object.
+
+Selected Settings reconciles Blender's persistent native panels using a private,
+unlinked, zero-user empty object as a template owner. Your object and modifier stack
+are not changed; the helper is removed when Modifier Tools is disabled and recreated
+if needed after file loads. The search button uses the theme's neutral, unpressed
+button styling rather than the blue selected state.
+
+Selected Settings shares native-style layouts with the viewport popup. Bundled panel
+descriptions cover all 83 modifier types in the tested Blender 5.2 build, including
+Grease Pencil; they retain native section names, property order, labels and widget
+hints. Properties and popup use the same collapsible sections and shared runtime
+expansion state, with a matching bounded modifier-list height. Array uses dedicated
+native-style checkbox headers for offset and merge sections. Common conditional
+controls and modifier-specific actions are handled in Python. Physics/particle
+modifiers direct you to their dedicated tabs, as Blender's modifier panels do.
+
+This is not the native C++ drawer: conditional parity and specialized operations are
+not guaranteed for every modifier. Fields outside the generated descriptions appear
+under **Additional Settings**. Use **Native Stack** for Blender's exact complete UI.
+Descriptions can be regenerated from a matching Blender source checkout with the
+development generator; the add-on never downloads source at runtime. The viewport
+popup remains selected-only regardless of this Properties preference.
+
+## Tools: quick concepting
+
+In Object Mode, select meshes and open **MBToolkit > Tools > Concepting**.
+These tools do not require the optional Low to High feature.
+
+- **Triplanar UV** adds a reusable Geometry Nodes modifier that projects each face
+  along its dominant normal axis, targeting each mesh's active UV map by default
+  without adding another map. Meshes without UVs use `UVMap` in evaluated output.
+  For explicit texture mapping, connect a **UV Map** node using the modifier's
+  UV Map Name to your Image Texture's Vector input. The modifier
+  exposes Scale (texture repeats per local-space unit), Rotation (radians), Offset
+  (before projection), and UV Map Name. The target map is replaced only in evaluated
+  output; base-mesh UVs stay unchanged until you apply the modifier, and other maps
+  are preserved. Existing modifier targets are not automatically changed. This is hard-axis box projection with
+  seams, not seamless shader-blended triplanar mapping. Object transforms are not
+  applied; unapplied nonuniform scale can stretch the texture. Add this modifier
+  after geometry-generating modifiers. Repeated clicks do not add duplicates.
+- **Beveled Normal Material** assigns neutral grey clay to every material slot
+  using object-level overrides. Existing material datablocks are retained, but
+  selected objects' visible assignments are replaced; use Undo to restore them.
+  Unselected users of shared meshes keep their materials. An empty shared mesh is
+  copied only when a material slot must be added. Use **Cycles** and **Rendered**
+  viewport shading to see the bevel effect; the tool does not change your engine
+  or viewport mode. In the shared `MBT Beveled Normal Grey` material, adjust the
+  Bevel node's Radius (default 0.001) and Samples (default 32) in the Shader Editor.
+  Reusing a toolkit material also upgrades the old stock sample count of 4 to 32.
+  The effect changes shading only, not the silhouette or mesh topology. Repeated
+  clicks reuse the material, including your edits. On first reuse after this update,
+  a legacy unlinked stock radius of 0.01 is reduced to 0.001; custom radii and
+  animated materials are preserved.
+
+Both operations support Undo and ignore non-mesh and non-editable objects.
+
 ## Documentation and support
 
+- [Asset Processor wiki: quick start, workflows and reference](docs/asset-processor/README.md)
 - [UV tools guide](UV_SUITE.md)
 - [Vertex color controls and channel preview](VERTEX_COLOR.md)
 - [Substance Painter setup and workflow](SUBSTANCE_PAINTER.md)
@@ -51,6 +135,16 @@ For sensitive vulnerabilities, follow SECURITY.md instead of opening a public is
   the section selector. UV, Vertex Color, Painter, Geometry Nodes and Resample start disabled.
 - Missing panel: use a 3D Viewport, open its sidebar with **N**, and check whether
   Sidebar Tab Management has hidden the MBToolkit tab.
+- Initialization is deferred safely across startup, File > New and blend loads.
+  If an enabled feature fails to initialize, inspect its error in **General** and
+  use **Retry Initialization** instead of toggling unrelated features. This does
+  not unhide intentionally hidden tabs; restore those in **N-Panel** preferences.
+- **Copy Lifecycle Diagnostics** in General copies a read-only JSON snapshot of
+  requested/active features, missing classes, panel registration, workspace filtering,
+  initialization timers and shortcut counts. Capture it before retrying if a failure
+  recurs. Retry also repairs owned shortcut initialization and the sidebar controller;
+  it does not revive panels intentionally unregistered by another panel manager.
+  Workspace add-on filters remain respected; allow MBToolkit in that workspace if needed.
 - Shortcut conflicts: configure MBToolkit's shortcut preferences or Blender's keymap.
 - Import/registration errors: check the minimum Blender version, remove duplicate
   installations, restart Blender, and capture the traceback from the system console.
@@ -146,15 +240,18 @@ batch editing, color spaces, attribute management and preview limitations.
 
 - Modifier Properties shows compact favorites with at most four buttons per row,
   wrapping additional favorites onto new rows, the stack overview,
-  and Blender's native modifier settings, preserving their sections and controls.
-  Selecting a modifier in the list expands it and collapses the other modifiers;
-  their native headers remain visible. Manual expansion is retained until the
-  selection or stack changes.
+  and a search launcher beside a compact Add button. Click Search modifiers to open
+  a native F3-style floating picker; type, then click a result or press Enter to add
+  and select it. Escape cancels. Results never move the stack or settings.
+  The Add button retains the category overview. Modifier Properties always uses
+  Blender's native settings, without a display-mode toggle. Selection expands the
+  selected modifier and collapses the others; their headers remain visible because
+  Blender exposes no native per-modifier panel visibility filter.
 - Press **Shift + W** over the 3D View to open an in-viewport popup with favorites,
   the modifier list, and compact settings for the selected modifier. No separate
   window is created. The popup uses RNA controls rather than native modifier
   layouts; specialized collection editors and simulation/cache actions remain
-  available in the main Modifier Properties panel, which keeps its native UI.
+  available in the native main Modifier Properties panel.
   Change the key, Shift, Ctrl, and Alt in MBToolkit preferences > Modifiers;
   select None to disable it. A conflicting shortcut can be reassigned there.
 - The monitor button toggles realtime viewport evaluation and uses Blender's
@@ -279,13 +376,13 @@ remaining planned features, conservative algorithm limits and test instructions.
 The **Properties editor > Modifiers (wrench tab)** has a fixed, headerless favorites toolbar and compact modifier list above Blender's native settings. It is not a separate collapsible panel or an N-panel section. Selection follows the context object, including pinned Properties objects. Drawing never initializes or modifies datablocks.
 
 - Rename modifiers and use the small cage, Edit Mode, viewport, and render buttons on the right of each row. The old separate visibility overview box has been removed.
-- **Add Modifier** opens a category-column menu overview for editable supported objects in Object Mode. Selecting an entry uses normal menu dismissal rather than leaving an operator-properties popup open. Compatible entries are derived from the installed Blender menu definitions, including explicit built-in node assets. Native category asset catalogs remain accessible within the popup. Missing external assets may still report Blender's own availability error.
+- The **Search modifiers…** launcher occupies two-thirds of the Add row; the **Add** button occupies one-third and opens the category-column menu overview. Search opens Blender's native floating search popup, with modifier names and categories. Type in the popup and click or press Enter to add; Escape cancels. Results overlay the UI rather than shifting the stack or settings. Successful addition selects the new modifier while preserving bottom-relative pins. Compatible entries are derived from the installed Blender menu definitions, including explicit built-in node assets. Dynamic external asset catalogs remain accessible through the Add overview. Adding requires an editable supported Object Mode object. Missing assets may report Blender's own availability error.
 - **Preferences > Add-ons > MBToolkit > Modifiers:** select favorites by category and drag the compact icon-and-name tiles directly to reorder them in the four-column preview. The preview snaps to the new position while dragging; release commits, Escape or right-click cancels. No separate reorder popup, handles, or arrow/remove controls are needed. Toggle category buttons below to add/remove favorites. Favorites are disabled in incompatible object contexts. Use Blender's Save Preferences if automatic saving is disabled.
 - Favorites use compact labeled, icon-and-name buttons, wrapping after four entries. Both modifier-popup and pie shortcuts use a clickable capture field: press the combination, Escape cancels, Backspace or the X clears it. Ctrl, Shift, Alt and OS-key combinations are supported.
 - The row pin stores the modifier's **distance from the bottom**: last stays last, second-last stays second-last, and so on. Newly added modifiers are placed above a pinned tail. Pins use persistent modifier IDs and survive renaming. Previous exact-index records are converted once using the current modifier positions, outside drawing. Adding through the toolbar immediately restores pins; external changes are corrected on a deferred safe update. Multiple pins preserve unlocked modifiers' relative order. When a stack becomes too short, pins use the nearest available slots while retaining their requested bottom offsets.
 - The up/down controls beside the list reorder the selected modifier among unpinned slots and preserve selection. Unpin a modifier before moving it. Each row's X deletes that modifier, including pinned modifiers, and removes stale pin records. Reorder/delete require an editable Object Mode object and support undo; Blender's own modifier restrictions still apply.
 - Disable native Pin to Last before using bottom-relative pins. Native ordering restrictions can prevent restoration; conflicts are reported in the UI/console and are not endlessly retried for the same stack state. Updates are deferred during renders. Undo/redo and file-load notifications rebuild enforcement state; actual interactive undo timing requires a UI smoke test.
-- Full native modifier settings remain available in the same wrench tab; the list does not replace Blender's built-in modifier panels or change editor pins.
+- Modifier Properties always draws Blender's native modifier panels, including specialized collection editors, simulation/cache actions and Apply. There is no settings-mode toggle or custom Properties settings layout. Selection expands the selected modifier and collapses the others; manual expansion survives unchanged selection. Unselected native headers cannot be hidden through Blender's exposed Python API; no unsafe memory patches or temporary stack manipulation are used. The separate viewport popup retains its pre-existing compact RNA editor.
 - Linked/read-only objects are inspection-only. Individual read-only controls are disabled; the Add button is unavailable in unsupported contexts.
 - The native Modifier Properties draw function is temporarily replaced so there is one Add button and no movable list header. It is restored on disable. Other add-ons that replace the same native draw function may conflict; MBToolkit will not overwrite a later replacement during cleanup.
 

@@ -51,9 +51,15 @@ draw = uv_suite.draw
 
 def register():
     uv_suite.register()
-    register_classes(classes)
+    try:
+        register_classes(classes)
+    except Exception:
+        uv_suite.unregister()
+        raise
 
 
 def unregister():
-    unregister_classes(classes)
-    uv_suite.unregister()
+    try:
+        unregister_classes(classes)
+    finally:
+        uv_suite.unregister()

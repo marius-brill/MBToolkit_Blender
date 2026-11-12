@@ -10,12 +10,12 @@ from ...core.registry import register_classes, unregister_classes
 
 GROUP_NAME = "SDFremesh"
 MODIFIER_NAME = "SDFremesh"
-REV = 2
+REV = 3
 
 DEFAULTS = {"Density": 0.01, "Smoothing Iterations": 2, "Decimate Adaptivity": 0.001}
 
 
-def _build():
+def _build(legacy=False):
     ng = bpy.data.node_groups.new(GROUP_NAME, "GeometryNodeTree")
     iface = ng.interface
     gn.add_input(iface, "Geometry", "NodeSocketGeometry")
@@ -41,7 +41,10 @@ def _build():
     L(to_sdf, "SDF Grid", mean, "Grid")
     L(gi, "Smoothing Iterations", mean, "Iterations", in_i=2)
     L(mean, "Grid", to_mesh, "Grid")
-    L(gi, "Density", to_mesh, "Threshold", in_i=1)  # as in the reference setup
+    if legacy:
+        L(gi, "Density", to_mesh, "Threshold", in_i=1)
+    else:
+        gn.sock(to_mesh.inputs, 'Threshold', 1).default_value = 0.0
     L(gi, "Decimate Adaptivity", to_mesh, "Adaptivity", in_i=2)
     L(to_mesh, "Mesh", shade, "Mesh")
     L(shade, "Mesh", go, "Geometry")
@@ -49,7 +52,23 @@ def _build():
 
 
 def get_group():
-    return gn.ensure_group(GROUP_NAME, REV, _build)
+    return gn.ensure_group(GROUP_NAME, REV, _build, preserve_existing_name=True)
+
+
+class MBT_OT_upgrade_sdf_remesh(bpy.types.Operator):
+    bl_idname = 'mbt.upgrade_sdf_remesh'
+    bl_label = 'Upgrade Selected SDF Remesh'
+    bl_description = 'Upgrade stock legacy SDF modifiers to zero-surface extraction without changing input values'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return gn.poll_mesh_selected(context)
+
+    def execute(self, context):
+        count, skipped = gn.upgrade_selected_groups(context, GROUP_NAME, 2, lambda: _build(legacy=True), get_group)
+        self.report({'WARNING'} if skipped else {'INFO'}, f'Upgraded {count}; skipped {skipped} protected modifiers')
+        return {'FINISHED'}
 
 
 class MBT_OT_add_sdf_remesh(bpy.types.Operator):
@@ -67,11 +86,12 @@ class MBT_OT_add_sdf_remesh(bpy.types.Operator):
         return {"FINISHED"} if ok else {"CANCELLED"}
 
 
-classes = (MBT_OT_add_sdf_remesh,)
+classes = (MBT_OT_add_sdf_remesh, MBT_OT_upgrade_sdf_remesh)
 
 
 def draw(layout, context):
     layout.operator("mbt.add_sdf_remesh", icon="MOD_REMESH")
+    layout.operator('mbt.upgrade_sdf_remesh', icon='FILE_REFRESH')
 
 
 def register():
